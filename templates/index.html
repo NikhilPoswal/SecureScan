@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SecureScan — Website Security Auditor</title>
+  <meta name="description" content="Free instant security audit for any website. Check HTTP headers, SSL/TLS, cookies, server info leakage and exposed files." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+  <!-- Animated background -->
+  <div class="bg-canvas" aria-hidden="true">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div class="page-wrap">
+    <div class="container">
+
+      <!-- Topbar -->
+      <header class="topbar">
+        <div class="logo">
+          <div class="logo-mark" aria-hidden="true">🔍</div>
+          <span class="logo-wordmark">SecureScan</span>
+        </div>
+        <nav>
+          <a href="https://github.com" target="_blank" rel="noopener" class="btn btn-outline btn-sm">GitHub ↗</a>
+        </nav>
+      </header>
+
+      <!-- Hero -->
+      <main class="hero" id="hero">
+        <div class="hero-eyebrow">
+          <span class="eyebrow-dot"></span>
+          Free · No account required · Instant results
+        </div>
+
+        <h1 class="hero-title">Scan any website's<br>security posture</h1>
+        <p class="hero-sub">
+          Instantly audit HTTP headers, SSL certificates, cookie flags,
+          server info leakage, and exposed sensitive files.
+        </p>
+
+        <!-- Error -->
+        {% if error %}
+        <div class="alert alert-error" role="alert">
+          <span class="alert-icon">⚠️</span>
+          <span>{{ error }}</span>
+        </div>
+        {% endif %}
+
+        <!-- Scan form -->
+        <form id="scan-form" action="/scan" method="POST" novalidate>
+          <div class="scan-card" id="scan-card">
+            <span class="scan-card-icon" aria-hidden="true">🌐</span>
+            <input
+              id="url-input"
+              type="text"
+              name="url"
+              class="url-input"
+              placeholder="github.com or https://example.com"
+              value="{{ prefill or '' }}"
+              autocomplete="off"
+              spellcheck="false"
+              aria-label="Website URL to scan"
+            />
+            <button type="submit" id="scan-btn" class="btn btn-primary scan-submit">
+              <span id="btn-text">Scan Now</span>
+              <span id="btn-loader" hidden>
+                <span class="spinner"></span>
+                Scanning…
+              </span>
+            </button>
+          </div>
+        </form>
+
+        <!-- Feature pills -->
+        <div class="feature-strip" role="list" aria-label="What we check">
+          <div class="feature-pill" role="listitem"><span class="pill-icon">🛡️</span> Security Headers</div>
+          <div class="feature-pill" role="listitem"><span class="pill-icon">🔒</span> SSL / TLS Cert</div>
+          <div class="feature-pill" role="listitem"><span class="pill-icon">🍪</span> Cookie Flags</div>
+          <div class="feature-pill" role="listitem"><span class="pill-icon">🕵️</span> Server Info</div>
+          <div class="feature-pill" role="listitem"><span class="pill-icon">📁</span> Sensitive Files</div>
+        </div>
+      </main>
+
+    </div><!-- /container -->
+
+    <footer class="site-footer">
+      <div class="container">
+        Built for BCA Cybersecurity Portfolio &nbsp;·&nbsp; SecureScan v1
+      </div>
+    </footer>
+  </div><!-- /page-wrap -->
+
+  <script src="/js/main.js?v=3"></script>
+</body>
+</html>

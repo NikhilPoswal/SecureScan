@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ url }} — SecureScan Results</title>
+  <meta name="description" content="Security audit results for {{ url }}. Score: {{ score }}/100, Grade: {{ grade }}." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+  <!-- Animated background -->
+  <div class="bg-canvas" aria-hidden="true">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div class="page-wrap">
+    <div class="container">
+
+      <!-- Topbar -->
+      <header class="topbar">
+        <a href="/" class="logo" aria-label="SecureScan home">
+          <div class="logo-mark" aria-hidden="true">🔍</div>
+          <span class="logo-wordmark">SecureScan</span>
+        </a>
+        <a href="/" class="btn btn-outline btn-sm">← New Scan</a>
+      </header>
+
+      <main class="results-main">
+
+        <!-- Scanned URL pill -->
+        <div class="scanned-bar">
+          <span class="scanned-label">Scanned</span>
+          <span class="scanned-dot"></span>
+          <span class="scanned-url">{{ final_url }}</span>
+        </div>
+
+        <!-- ── Score hero card ── -->
+        <section
+          class="score-hero grade-{{ grade | lower }}"
+          aria-label="Overall security score: {{ score }} out of 100, Grade {{ grade }}"
+        >
+          <div class="grade-circle grade-{{ grade | lower }}" aria-hidden="true">
+            <span class="grade-letter">{{ grade }}</span>
+          </div>
+
+          <div class="score-info">
+            <div class="score-headline">
+              <span
+                class="score-number"
+                id="score-counter"
+                data-target="{{ score }}"
+                aria-label="{{ score }} out of 100"
+              >0</span>
+              <span class="score-denom" aria-hidden="true">/100</span>
+            </div>
+            <div class="score-label">Security Score</div>
+            <div class="score-track" aria-hidden="true">
+              <div
+                class="score-fill"
+                id="score-bar"
+                data-target="{{ score }}"
+              ></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ── Detailed checks ── -->
+        <p class="section-label">Detailed Checks</p>
+
+        <div class="checks-list">
+          {% for check in checks %}
+          <article
+            class="check-card {{ 'pass' if check.passed else 'fail' }}"
+          >
+            <div class="check-card-inner">
+
+              <!-- Card header -->
+              <div class="card-header">
+                <div class="status-icon" aria-hidden="true">
+                  {{ '✅' if check.passed else '❌' }}
+                </div>
+                <div class="card-title-group">
+                  <div class="card-title">{{ check.name }}</div>
+                  <div class="card-subtitle">
+                    {% if check.passed %}
+                      Passed — no issues found
+                    {% else %}
+                      Failed — action recommended
+                    {% endif %}
+                  </div>
+                </div>
+                {% if check.deducted > 0 %}
+                <span class="deduct-pill has-deduction" aria-label="minus {{ check.deducted }} points">
+                  −{{ check.deducted }} pts
+                </span>
+                {% else %}
+                <span class="deduct-pill no-deduction" aria-label="no points deducted">
+                  ✓ 0 pts
+                </span>
+                {% endif %}
+              </div>
+
+              <!-- Plain-English explanation -->
+              <p class="card-explanation">{{ check.explanation }}</p>
+
+              <!-- ── Header detail table (Check 1) ── -->
+              {% if check.detail_rows is defined %}
+              <button
+                class="detail-toggle"
+                aria-expanded="false"
+                aria-controls="detail-{{ loop.index }}"
+              >
+                View header breakdown
+                <i class="toggle-arrow" aria-hidden="true">▾</i>
+              </button>
+              <div class="detail-panel" id="detail-{{ loop.index }}" role="region">
+                <div class="detail-table-wrap">
+                  <table class="detail-table">
+                    <thead>
+                      <tr>
+                        <th>Header</th>
+                        <th>Status</th>
+                        <th>Risk pts</th>
+                        <th>Why it matters</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for row in check.detail_rows %}
+                      <tr class="{{ 'row-pass' if row.found else 'row-fail' }}">
+                        <td><code>{{ row.name }}</code></td>
+                        <td>{{ '✅ Present' if row.found else '❌ Missing' }}</td>
+                        <td>{{ row.points }}</td>
+                        <td>{{ row.description }}</td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              {% endif %}
+
+              <!-- ── Cookie detail table (Check 3) ── -->
+              {% if check.cookie_details is defined and check.cookie_details %}
+              <button
+                class="detail-toggle"
+                aria-expanded="false"
+                aria-controls="cookie-{{ loop.index }}"
+              >
+                View cookie breakdown
+                <i class="toggle-arrow" aria-hidden="true">▾</i>
+              </button>
+              <div class="detail-panel" id="cookie-{{ loop.index }}" role="region">
+                <div class="detail-table-wrap">
+                  <table class="detail-table">
+                    <thead>
+                      <tr>
+                        <th>Cookie name</th>
+                        <th>Secure</th>
+                        <th>HttpOnly</th>
+                        <th>SameSite</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for c in check.cookie_details %}
+                      <tr>
+                        <td><code>{{ c.name }}</code></td>
+                        <td class="{{ 'cookie-pass' if c.secure else 'cookie-fail' }}">
+                          {{ '✅' if c.secure else '❌' }}
+                        </td>
+                        <td class="{{ 'cookie-pass' if c.httponly else 'cookie-fail' }}">
+                          {{ '✅' if c.httponly else '❌' }}
+                        </td>
+                        <td class="{{ 'cookie-pass' if c.samesite else 'cookie-fail' }}">
+                          {{ '✅' if c.samesite else '❌' }}
+                        </td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              {% endif %}
+
+              <!-- ── Exposed files (Check 5) ── -->
+              {% if check.exposed_paths is defined and check.exposed_paths %}
+              <ul class="exposed-list" aria-label="Exposed sensitive paths">
+                {% for path in check.exposed_paths %}
+                <li class="exposed-item">{{ final_url }}{{ path }}</li>
+                {% endfor %}
+              </ul>
+              {% endif %}
+
+            </div><!-- /check-card-inner -->
+          </article>
+          {% endfor %}
+        </div><!-- /checks-list -->
+
+        <!-- Rescan -->
+        <div class="rescan-section">
+          <p>Want to check another domain?</p>
+          <a href="/" class="btn btn-primary">← Scan another URL</a>
+        </div>
+
+      </main>
+    </div><!-- /container -->
+
+    <footer class="site-footer">
+      <div class="container">
+        Built for BCA Cybersecurity Portfolio &nbsp;·&nbsp; SecureScan v1
+      </div>
+    </footer>
+  </div><!-- /page-wrap -->
+
+  <script src="/js/main.js?v=3"></script>
+</body>
+</html>

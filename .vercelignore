@@ -1,0 +1,35 @@
+# .vercelignore — files/dirs excluded from Vercel deployment bundle
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env.local
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Development & test files
+static/
+scratch/
+*.log
+
+# Editor & OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Git
+.git/
+.gitignore
+
+# Local dev artifacts
+*.sqlite3
+*.db
