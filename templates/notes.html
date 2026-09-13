@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Engineering Notes &amp; Known Limitations — SecureScan</title>
+  <meta
+    name="description"
+    content="Technical documentation on architectural constraints, WAF platform reputation, anti-bot challenge boundaries, and passive auditing philosophy in SecureScan."
+  />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+
+  <link rel="stylesheet" href="/css/style.css?v=12" />
+</head>
+<body>
+  <!-- Keyboard skip link -->
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
+  <!-- Ambient background glow elements -->
+  <div class="glow-orb glow-orb-1" aria-hidden="true"></div>
+  <div class="glow-orb glow-orb-2" aria-hidden="true"></div>
+
+  <div class="page-wrap">
+    <div class="container">
+
+      <!-- Topbar -->
+      <header class="topbar">
+        <a href="/" class="logo" aria-label="SecureScan home">
+          <div class="logo-mark" aria-hidden="true">🔍</div>
+          <span class="logo-wordmark">SecureScan</span>
+        </a>
+        <div class="topbar-actions">
+          <a href="/" class="btn btn-outline btn-sm">← Back to Scanner</a>
+        </div>
+      </header>
+
+      <main class="notes-main" id="main-content">
+        <!-- Notes Hero -->
+        <header class="notes-hero">
+          <div class="badge-pill">
+            <span class="badge-dot" aria-hidden="true"></span>
+            Technical Specification &amp; Boundary Conditions
+          </div>
+          <h1 class="notes-title">Engineering Notes &amp; Limitations</h1>
+          <p class="notes-sub">
+            A transparent breakdown of architectural constraints, network realities, anti-bot barriers,
+            and design trade-offs discovered while developing SecureScan.
+          </p>
+        </header>
+
+        <!-- Notes Content Sections -->
+        <div class="notes-grid">
+
+          <!-- 1. Passive Auditing Philosophy -->
+          <article class="notes-card" id="design-philosophy">
+            <div class="notes-card-header">
+              <span class="notes-section-num">01</span>
+              <div class="notes-card-title-group">
+                <span class="notes-card-badge badge-blue">Design Principle</span>
+                <h2 class="notes-card-title">Passive, Read-Only Auditing Philosophy</h2>
+              </div>
+            </div>
+            <div class="notes-card-body">
+              <p>
+                SecureScan is strictly designed as a <strong>passive, non-intrusive security evaluation tool</strong>.
+                It analyzes public cryptographic handshakes, HTTP response headers, SSL/TLS certificate chains,
+                cookie attributes, DNS security records (SPF/DMARC), and public file status codes without altering state or injecting malicious payloads.
+              </p>
+              <p>
+                By deliberate design, SecureScan <strong>does not implement bot-detection evasion</strong> (e.g., residential proxy rotation, browser fingerprint spoofing, or headless automation designed to bypass security controls).
+                Attempting to stealthily evade WAFs or mimic human behavior would contradict the tool's core premise: providing an authentic, reproducible audit of what standard external network clients observe.
+              </p>
+            </div>
+          </article>
+
+          <!-- 2. Shared Platform Reputation -->
+          <article class="notes-card" id="shared-platform-waf">
+            <div class="notes-card-header">
+              <span class="notes-section-num">02</span>
+              <div class="notes-card-title-group">
+                <span class="notes-card-badge badge-amber">Platform Reality</span>
+                <h2 class="notes-card-title">Cross-Project WAF &amp; Shared Hosting Reputation</h2>
+              </div>
+            </div>
+            <div class="notes-card-body">
+              <p>
+                In modern serverless and cloud hosting ecosystems (such as Vercel, Cloudflare Pages, AWS Lambda, and Netlify), thousands of distinct web projects share common outbound egress IP ranges and incoming edge proxies.
+              </p>
+              <p>
+                During engineering trials, we observed that rapid, burst-heavy scanning of <em>one</em> Vercel-hosted domain can trigger edge WAF protection (HTTP 429 or 403 rate-limiting) that temporarily impacts subsequent scans of <strong>unrelated Vercel-hosted domains</strong>.
+                Because edge mitigation rules often track request velocity per client IP against the entire shared edge infrastructure rather than a single customer tenant, multi-tenant platforms exhibit cross-project reputation coupling.
+              </p>
+              <p class="notes-callout">
+                <strong>Key Takeaway:</strong> If you scan multiple sites hosted on the same infrastructure provider in rapid succession, edge rate limits may trigger even if each individual site has received only one request.
+              </p>
+            </div>
+          </article>
+
+          <!-- 3. Cloudflare Turnstile & Anti-Bot Walls -->
+          <article class="notes-card" id="anti-bot-challenges">
+            <div class="notes-card-header">
+              <span class="notes-section-num">03</span>
+              <div class="notes-card-title-group">
+                <span class="notes-card-badge badge-red">Edge Barriers</span>
+                <h2 class="notes-card-title">Cloudflare Turnstile &amp; Managed Challenge Pages</h2>
+              </div>
+            </div>
+            <div class="notes-card-body">
+              <p>
+                Websites protected by advanced bot-mitigation services (such as Cloudflare Managed Challenges, Turnstile interstitials, Akamai Bot Manager, or AWS WAF Challenge) deliver dynamic JavaScript challenge barriers (e.g., <code>&lt;title&gt;Just a moment...&lt;/title&gt;</code>) accompanied by HTTP 403/503 statuses and headers like <code>cf-mitigated: challenge</code>.
+              </p>
+              <p>
+                Because SecureScan operates as a high-performance Python HTTP client, it deliberately lacks a full JavaScript execution engine (such as V8 or Chromium). It cannot solve interactive cryptographic proof-of-work challenges, render Canvas fingerprints, or execute Turnstile tokens.
+              </p>
+              <p>
+                This is not a defect unique to SecureScan; it applies equally to standard command-line tools like <code>curl</code>, API clients, and automated vulnerability scanners. SecureScan includes dedicated challenge detection to identify these barriers honestly and inform users rather than computing an inaccurate security score.
+              </p>
+            </div>
+          </article>
+
+          <!-- 4. SSRF Protections -->
+          <article class="notes-card" id="ssrf-mitigation">
+            <div class="notes-card-header">
+              <span class="notes-section-num">04</span>
+              <div class="notes-card-title-group">
+                <span class="notes-card-badge badge-green">Defensive Boundary</span>
+                <h2 class="notes-card-title">Server-Side Request Forgery (SSRF) Mitigations</h2>
+              </div>
+            </div>
+            <div class="notes-card-body">
+              <p>
+                Allowing an automated tool to fetch user-specified URLs introduces Server-Side Request Forgery (SSRF) vectors, where attackers could attempt to probe cloud instance metadata endpoints (e.g., <code>169.254.169.254</code>), loopback adapters (<code>127.0.0.1</code>, <code>::1</code>), or internal VPC addresses.
+              </p>
+              <p>
+                SecureScan applies strict defensive validation prior to creating outbound network sockets:
+              </p>
+              <ul class="notes-list">
+                <li>All submitted target hostnames are resolved to both IPv4 and IPv6 addresses before connecting.</li>
+                <li>Any destination falling within private, link-local, loopback, multicast, or reserved IP ranges is immediately rejected with a descriptive explanation.</li>
+                <li>HTTP redirects are validated at every hop to prevent open-redirect SSRF bypasses.</li>
+              </ul>
+            </div>
+          </article>
+
+          <!-- 5. Ephemeral Serverless Architecture -->
+          <article class="notes-card" id="serverless-architecture">
+            <div class="notes-card-header">
+              <span class="notes-section-num">05</span>
+              <div class="notes-card-title-group">
+                <span class="notes-card-badge badge-blue">Infrastructure</span>
+                <h2 class="notes-card-title">Serverless Execution &amp; Rate-Limiting Bounds</h2>
+              </div>
+            </div>
+            <div class="notes-card-body">
+              <p>
+                SecureScan runs entirely on stateless serverless compute instances. Memory is retained only for the lifespan of warm container invocations.
+              </p>
+              <p>
+                To protect shared resources from automated abuse, SecureScan implements a sliding-window rate limit (10 scans / minute per IP) enforced using client IP extraction from verified edge proxy headers. Scan history and previous results are stored exclusively in client-side <code>sessionStorage</code>, ensuring user privacy and zero persistent database tracking.
+              </p>
+            </div>
+          </article>
+
+          <!-- 6. Scope & Vulnerability Coverage (OWASP Mapping) -->
+          <article class="notes-card" id="scope-coverage">
+            <div class="notes-card-header">
+              <span class="notes-section-num">06</span>
+              <div class="notes-card-title-group">
+                <span class="notes-card-badge badge-amber">Audit Boundaries</span>
+                <h2 class="notes-card-title">Scope &amp; Vulnerability Coverage (OWASP Mapping)</h2>
+              </div>
+            </div>
+            <div class="notes-card-body">
+              <p>
+                To maintain technical clarity and set honest expectations, it is essential to distinguish between a
+                <strong>passive configuration auditor</strong> and an <strong>active vulnerability scanner</strong>.
+              </p>
+              <p>
+                SecureScan operates exclusively as a passive, read-only configuration tool. It inspects what a web server exposes through standard HTTP requests, TLS handshakes, and public DNS records.
+                It deliberately <strong>does not perform active or dynamic testing</strong>—such as injecting SQL syntax, fuzzing parameters, or attempting cross-site scripting executions. Active vulnerability scanning is a fundamentally different, more invasive category of security testing (exemplified by tools like <strong>Burp Suite</strong>, <strong>OWASP ZAP</strong>, and <strong>sqlmap</strong>) and is intentionally outside this project's scope.
+              </p>
+              <p>
+                The table below defines how SecureScan's 10 passive checks map against common OWASP-style vulnerability classifications:
+              </p>
+
+              <div class="notes-table-wrap">
+                <table class="notes-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Category</th>
+                      <th scope="col">Coverage</th>
+                      <th scope="col">Why / Technical Distinction</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td class="category-name"><strong>XSS (Cross-Site Scripting)</strong></td>
+                      <td><span class="coverage-badge badge-indirect">Indirect only</span></td>
+                      <td>We check whether a CSP defense exists, not whether the site actually has an exploitable XSS flaw. Confirming real XSS requires payload injection and observing execution, which this tool does not do.</td>
+                    </tr>
+                    <tr>
+                      <td class="category-name"><strong>SQL Injection (SQLi)</strong></td>
+                      <td><span class="coverage-badge badge-not-covered">Not covered</span></td>
+                      <td>Requires sending crafted input to parameters/forms and observing database-error behavior — active testing outside this tool's scope.</td>
+                    </tr>
+                    <tr>
+                      <td class="category-name"><strong>Security Misconfiguration</strong></td>
+                      <td><span class="coverage-badge badge-covered">Covered</span></td>
+                      <td>This is the tool's core strength: headers, CORS, cookies, dangerous HTTP methods, sensitive file exposure, and server fingerprinting are all checked directly.</td>
+                    </tr>
+                    <tr>
+                      <td class="category-name"><strong>Broken Access Control</strong></td>
+                      <td><span class="coverage-badge badge-not-covered">Not covered</span></td>
+                      <td>Requires testing authenticated flows (can user A reach user B's data, can a normal user reach admin routes). This tool has no concept of authentication/sessions to test against.</td>
+                    </tr>
+                    <tr>
+                      <td class="category-name"><strong>SSRF</strong></td>
+                      <td><span class="coverage-badge badge-different">Different direction</span></td>
+                      <td>This tool protects <strong>ITSELF</strong> from being abused as an SSRF vector (blocks scanning internal/private addresses). It does not test whether the <strong>TARGET</strong> site is vulnerable to SSRF — that's the opposite check.</td>
+                    </tr>
+                    <tr>
+                      <td class="category-name"><strong>Outdated Components</strong></td>
+                      <td><span class="coverage-badge badge-indirect">Indirect only</span></td>
+                      <td>Server fingerprinting can reveal a version banner, which could be manually cross-referenced against known CVEs, but this tool doesn't perform that lookup itself.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </article>
+
+        </div><!-- /notes-grid -->
+
+        <!-- Bottom Action CTA -->
+        <div class="rescan-section notes-bottom-cta">
+          <p>Ready to evaluate another website with these parameters in mind?</p>
+          <a href="/" class="btn btn-primary btn-large">← Return to Security Scanner</a>
+        </div>
+
+      </main>
+
+    </div><!-- /container -->
+
+    <footer class="site-footer">
+      <div class="container site-footer-inner">
+        <span>Built for BCA Cybersecurity Portfolio &nbsp;·&nbsp; SecureScan v1</span>
+        <span class="footer-sep">·</span>
+        <a href="/notes" class="footer-link">Engineering Notes &amp; Limitations</a>
+      </div>
+    </footer>
+  </div><!-- /page-wrap -->
+
+  <script src="/js/main.js?v=12"></script>
+</body>
+</html>

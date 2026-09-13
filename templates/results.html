@@ -8,9 +8,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/style.css?v=12" />
 </head>
 <body>
+  <!-- Keyboard skip link -->
+  <a href="#main-content" class="skip-link">Skip to main content</a>
 
   <!-- Animated background -->
   <div class="bg-canvas" aria-hidden="true">
@@ -28,16 +30,74 @@
           <div class="logo-mark" aria-hidden="true">🔍</div>
           <span class="logo-wordmark">SecureScan</span>
         </a>
-        <a href="/" class="btn btn-outline btn-sm">← New Scan</a>
+        <div class="topbar-actions">
+          <!-- Session Scan History Dropdown -->
+          <div class="history-dropdown-wrap" id="history-dropdown-wrap">
+            <button
+              type="button"
+              id="history-toggle-btn"
+              class="btn btn-outline btn-sm btn-history"
+              aria-expanded="false"
+              aria-haspopup="true"
+              aria-controls="history-dropdown-menu"
+              aria-label="Recent scans from this session"
+              title="Recent scans from this session"
+            >
+              <span class="btn-history-icon" aria-hidden="true">🕒</span>
+              <span class="btn-history-text">Recent</span>
+              <span class="history-count-badge" id="history-count-badge" aria-hidden="true">0</span>
+            </button>
+            <div id="history-dropdown-menu" class="history-dropdown-menu" role="region" aria-label="Session history dropdown" hidden>
+              <div class="history-menu-header">
+                <div class="history-menu-title-wrap">
+                  <span class="history-menu-title">Session History</span>
+                  <span class="history-menu-sub">Last 5 Scans</span>
+                </div>
+                <button type="button" id="history-clear-btn" class="history-clear-btn" aria-label="Clear session history" title="Clear session history">Clear</button>
+              </div>
+              <div id="history-items-container" class="history-items-container" role="menu" aria-label="Session scan history items">
+                <!-- Injected dynamically by main.js -->
+              </div>
+            </div>
+          </div>
+
+          {% if report_json_b64 is defined and report_json_b64 %}
+          <form action="/export-pdf" method="POST" target="_blank" class="pdf-export-form">
+            <input type="hidden" name="report_data" value="{{ report_json_b64 }}">
+            <button type="submit" id="download-pdf-topbar-btn" class="btn btn-outline btn-sm btn-pdf" aria-label="Download audit report as PDF">
+              <span class="btn-pdf-icon" aria-hidden="true">📄</span> Download PDF
+            </button>
+          </form>
+          {% endif %}
+          <a href="/" class="btn btn-outline btn-sm">← New Scan</a>
+        </div>
       </header>
 
-      <main class="results-main">
+      <main class="results-main" id="main-content">
 
         <!-- Scanned URL pill -->
         <div class="scanned-bar">
           <span class="scanned-label">Scanned</span>
           <span class="scanned-dot"></span>
           <span class="scanned-url">{{ final_url }}</span>
+        </div>
+
+        <!-- Session History Quick Switcher Bar (Hidden if empty or only 1 scan) -->
+        <div id="session-history-bar" class="session-history-bar" hidden>
+          <div class="history-bar-inner">
+            <span class="history-bar-label">
+              <span class="history-bar-icon" aria-hidden="true">🕒</span> Recent:
+            </span>
+            <div id="history-pills-container" class="history-pills-container" role="toolbar" aria-label="Recent session scans">
+              <!-- Compact pills injected dynamically by main.js -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Restore Notice Toast -->
+        <div id="history-restore-notice" class="history-restore-notice" hidden role="status" aria-live="polite">
+          <span class="restore-notice-icon" aria-hidden="true">⚡</span>
+          <span id="history-restore-text">Restored scan from session history</span>
         </div>
 
         <!-- ── Score hero card ── -->
@@ -77,6 +137,8 @@
           {% for check in checks %}
           <article
             class="check-card {{ 'pass' if check.passed else 'fail' }}"
+            role="region"
+            aria-label="Check {{ loop.index }} of 10: {{ check.name }}. Status: {{ 'Passed (0 points deducted)' if check.passed else 'Failed (' ~ check.deducted ~ ' points deducted)' }}"
           >
             <div class="check-card-inner">
 
@@ -86,7 +148,12 @@
                   {{ '✅' if check.passed else '❌' }}
                 </div>
                 <div class="card-title-group">
-                  <div class="card-title">{{ check.name }}</div>
+                  <div class="card-title-row">
+                    <span class="card-title">{{ check.name }}</span>
+                    {% if check.category is defined and check.category %}
+                    <span class="category-badge">{{ check.category }}</span>
+                    {% endif %}
+                  </div>
                   <div class="card-subtitle">
                     {% if check.passed %}
                       Passed — no issues found
@@ -109,9 +176,88 @@
               <!-- Plain-English explanation -->
               <p class="card-explanation">{{ check.explanation }}</p>
 
-              <!-- ── Header detail table (Check 1) ── -->
+              <!-- ── Check 1: Certificate details ── -->
+              {% if check.cert_info is defined and check.cert_info %}
+              <button
+                type="button"
+                class="detail-toggle"
+                aria-expanded="false"
+                aria-controls="cert-{{ loop.index }}"
+              >
+                View certificate details
+                <i class="toggle-arrow" aria-hidden="true">▾</i>
+              </button>
+              <div class="detail-panel" id="cert-{{ loop.index }}" role="region">
+                <div class="detail-grid">
+                  <div class="detail-item">
+                    <span class="detail-label">Subject / Common Name:</span>
+                    <span class="detail-val"><code>{{ check.cert_info.subject or 'Unknown' }}</code></span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Certificate Authority (Issuer):</span>
+                    <span class="detail-val"><code>{{ check.cert_info.issuer or 'Unknown' }}</code></span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Expiration Date:</span>
+                    <span class="detail-val"><code>{{ check.cert_info.expiry or 'Unknown' }}</code></span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Validity Remaining:</span>
+                    <span class="detail-val">
+                      {% if check.cert_info.days_left is not none %}
+                        <span class="{{ 'badge-green' if check.cert_info.days_left > 14 else 'badge-red' }}">{{ check.cert_info.days_left }} days</span>
+                      {% else %}
+                        <code>Unknown</code>
+                      {% endif %}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {% endif %}
+
+              <!-- ── Check 2: TLS Protocol & Cipher details ── -->
+              {% if check.tls_details is defined and check.tls_details %}
+              <button
+                type="button"
+                class="detail-toggle"
+                aria-expanded="false"
+                aria-controls="tls-{{ loop.index }}"
+              >
+                View TLS protocol &amp; cipher details
+                <i class="toggle-arrow" aria-hidden="true">▾</i>
+              </button>
+              <div class="detail-panel" id="tls-{{ loop.index }}" role="region">
+                <div class="detail-grid">
+                  <div class="detail-item">
+                    <span class="detail-label">Negotiated Protocol:</span>
+                    <span class="detail-val"><code>{{ check.tls_details.version or 'Unknown' }}</code></span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Negotiated Cipher:</span>
+                    <span class="detail-val"><code>{{ check.tls_details.cipher_name or 'Unknown' }}</code></span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Encryption Key Length:</span>
+                    <span class="detail-val"><code>{{ check.tls_details.cipher_bits or 'Unknown' }} bits</code></span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Legacy Handshake (TLS 1.0/1.1):</span>
+                    <span class="detail-val">
+                      {% if check.tls_details.legacy_allowed %}
+                        <span class="badge-red">⚠️ Accepted (Downgrade Risk)</span>
+                      {% else %}
+                        <span class="badge-green">✅ Rejected (Enforced Modern TLS)</span>
+                      {% endif %}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {% endif %}
+
+              <!-- ── Check 3: Header detail table ── -->
               {% if check.detail_rows is defined %}
               <button
+                type="button"
                 class="detail-toggle"
                 aria-expanded="false"
                 aria-controls="detail-{{ loop.index }}"
@@ -145,9 +291,45 @@
               </div>
               {% endif %}
 
-              <!-- ── Cookie detail table (Check 3) ── -->
+              <!-- ── Check 4: CORS details ── -->
+              {% if check.cors_details is defined and check.cors_details %}
+              <button
+                type="button"
+                class="detail-toggle"
+                aria-expanded="false"
+                aria-controls="cors-{{ loop.index }}"
+              >
+                View CORS configuration details
+                <i class="toggle-arrow" aria-hidden="true">▾</i>
+              </button>
+              <div class="detail-panel" id="cors-{{ loop.index }}" role="region">
+                <div class="detail-grid">
+                  <div class="detail-item">
+                    <span class="detail-label">Access-Control-Allow-Origin:</span>
+                    <span class="detail-val"><code>{{ check.cors_details.allow_origin or '(none returned)' }}</code></span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Access-Control-Allow-Credentials:</span>
+                    <span class="detail-val"><code>{{ check.cors_details.allow_credentials or 'false' }}</code></span>
+                  </div>
+                  <div class="detail-item full-width">
+                    <span class="detail-label">CORS Risk Assessment:</span>
+                    <span class="detail-val">
+                      {% if check.cors_details.vulnerable %}
+                        <span class="badge-red">⚠️ Dangerous: Reflected Origin with Credentials Allowed</span>
+                      {% else %}
+                        <span class="badge-green">✅ Safe: No credential leakage across arbitrary origins</span>
+                      {% endif %}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {% endif %}
+
+              <!-- ── Check 5: Cookie detail table ── -->
               {% if check.cookie_details is defined and check.cookie_details %}
               <button
+                type="button"
                 class="detail-toggle"
                 aria-expanded="false"
                 aria-controls="cookie-{{ loop.index }}"
@@ -187,7 +369,118 @@
               </div>
               {% endif %}
 
-              <!-- ── Exposed files (Check 5) ── -->
+              <!-- ── Check 6: Mixed Content details ── -->
+              {% if check.mixed_details is defined and (check.mixed_details.active_count > 0 or check.mixed_details.passive_count > 0) %}
+              <button
+                type="button"
+                class="detail-toggle"
+                aria-expanded="false"
+                aria-controls="mixed-{{ loop.index }}"
+              >
+                View insecure mixed content ({{ check.mixed_details.active_count + check.mixed_details.passive_count }} items)
+                <i class="toggle-arrow" aria-hidden="true">▾</i>
+              </button>
+              <div class="detail-panel" id="mixed-{{ loop.index }}" role="region">
+                {% if check.mixed_details.active_samples %}
+                <p class="detail-subheading"><span class="badge-red">Active Mixed Content</span> (scripts, stylesheets, frames):</p>
+                <ul class="insecure-resource-list">
+                  {% for sample in check.mixed_details.active_samples %}
+                  <li><code>{{ sample }}</code></li>
+                  {% endfor %}
+                </ul>
+                {% endif %}
+                {% if check.mixed_details.passive_samples %}
+                <p class="detail-subheading"><span class="badge-amber">Passive Mixed Content</span> (images, audio, video):</p>
+                <ul class="insecure-resource-list">
+                  {% for sample in check.mixed_details.passive_samples %}
+                  <li><code>{{ sample }}</code></li>
+                  {% endfor %}
+                </ul>
+                {% endif %}
+              </div>
+              {% endif %}
+
+              <!-- ── Check 7: Dangerous HTTP Methods details ── -->
+              {% if check.methods_details is defined and check.methods_details %}
+              <button
+                type="button"
+                class="detail-toggle"
+                aria-expanded="false"
+                aria-controls="methods-{{ loop.index }}"
+              >
+                View HTTP methods details
+                <i class="toggle-arrow" aria-hidden="true">▾</i>
+              </button>
+              <div class="detail-panel" id="methods-{{ loop.index }}" role="region">
+                <div class="detail-grid">
+                  <div class="detail-item">
+                    <span class="detail-label">Advertised HTTP Methods:</span>
+                    <div class="detail-val method-tag-group">
+                      {% if check.methods_details.allowed_methods %}
+                        {% for m in check.methods_details.allowed_methods %}
+                        <span class="method-tag {{ 'method-danger' if m in ['TRACE', 'PUT', 'DELETE'] else 'method-safe' }}">{{ m }}</span>
+                        {% endfor %}
+                      {% else %}
+                        <code>None advertised via OPTIONS</code>
+                      {% endif %}
+                    </div>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">TRACE Method Status:</span>
+                    <span class="detail-val">
+                      {% if check.methods_details.trace_enabled %}
+                        <span class="badge-red">⚠️ Enabled (Cross-Site Tracing / XST vulnerability)</span>
+                      {% else %}
+                        <span class="badge-green">✅ Disabled or Blocked</span>
+                      {% endif %}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {% endif %}
+
+              <!-- ── Check 8: Email Spoofing Defense details ── -->
+              {% if check.email_details is defined and check.email_details %}
+              <button
+                type="button"
+                class="detail-toggle"
+                aria-expanded="false"
+                aria-controls="email-{{ loop.index }}"
+              >
+                View SPF &amp; DMARC DNS records
+                <i class="toggle-arrow" aria-hidden="true">▾</i>
+              </button>
+              <div class="detail-panel" id="email-{{ loop.index }}" role="region">
+                <div class="detail-grid">
+                  <div class="detail-item full-width">
+                    <span class="detail-label">SPF TXT Record:</span>
+                    <div class="detail-val">
+                      {% if check.email_details.spf_record %}
+                        <div class="dns-record-box"><code>{{ check.email_details.spf_record }}</code></div>
+                        <span class="badge-green">Policy: {{ check.email_details.spf_policy or 'Configured' }}</span>
+                      {% else %}
+                        <span class="badge-red">❌ No SPF record configured</span>
+                      {% endif %}
+                    </div>
+                  </div>
+                  <div class="detail-item full-width">
+                    <span class="detail-label">DMARC TXT Record (_dmarc.domain):</span>
+                    <div class="detail-val">
+                      {% if check.email_details.dmarc_record %}
+                        <div class="dns-record-box"><code>{{ check.email_details.dmarc_record }}</code></div>
+                        <span class="{{ 'badge-green' if check.email_details.dmarc_policy in ['reject', 'quarantine'] else 'badge-amber' }}">
+                          Policy: p={{ check.email_details.dmarc_policy or 'none' }}
+                        </span>
+                      {% else %}
+                        <span class="badge-red">❌ No DMARC record configured</span>
+                      {% endif %}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {% endif %}
+
+              <!-- ── Check 9: Exposed files ── -->
               {% if check.exposed_paths is defined and check.exposed_paths %}
               <ul class="exposed-list" aria-label="Exposed sensitive paths">
                 {% for path in check.exposed_paths %}
@@ -196,27 +489,74 @@
               </ul>
               {% endif %}
 
+              <!-- ── Check 10: Server Fingerprinting details ── -->
+              {% if check.fingerprint_details is defined and check.fingerprint_details %}
+              <button
+                type="button"
+                class="detail-toggle"
+                aria-expanded="false"
+                aria-controls="fingerprint-{{ loop.index }}"
+              >
+                View server banner details
+                <i class="toggle-arrow" aria-hidden="true">▾</i>
+              </button>
+              <div class="detail-panel" id="fingerprint-{{ loop.index }}" role="region">
+                <div class="detail-grid">
+                  <div class="detail-item">
+                    <span class="detail-label">Server Header:</span>
+                    <span class="detail-val"><code>{{ check.fingerprint_details.server_banner or '(omitted / hidden)' }}</code></span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">X-Powered-By Header:</span>
+                    <span class="detail-val"><code>{{ check.fingerprint_details.powered_by or '(omitted / hidden)' }}</code></span>
+                  </div>
+                  <div class="detail-item full-width">
+                    <span class="detail-label">Fingerprint Assessment:</span>
+                    <span class="detail-val">
+                      {% if check.fingerprint_details.has_version %}
+                        <span class="badge-red">⚠️ Exact version number exposed in server header</span>
+                      {% else %}
+                        <span class="badge-green">✅ Generic or concealed headers (no version leak)</span>
+                      {% endif %}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {% endif %}
+
             </div><!-- /check-card-inner -->
           </article>
           {% endfor %}
         </div><!-- /checks-list -->
 
-        <!-- Rescan -->
+        <!-- Rescan & Export -->
         <div class="rescan-section">
-          <p>Want to check another domain?</p>
-          <a href="/" class="btn btn-primary">← Scan another URL</a>
+          <p>Download your comprehensive cybersecurity audit report or test another domain.</p>
+          <div class="results-action-buttons">
+            {% if report_json_b64 is defined and report_json_b64 %}
+            <form action="/export-pdf" method="POST" target="_blank" class="pdf-export-form">
+              <input type="hidden" name="report_data" value="{{ report_json_b64 }}">
+              <button type="submit" id="download-pdf-btn" class="btn btn-primary btn-pdf-large" aria-label="Download full cybersecurity audit report as PDF">
+                <span class="btn-pdf-icon" aria-hidden="true">📄</span> Download Full PDF Report
+              </button>
+            </form>
+            {% endif %}
+            <a href="/" class="btn btn-outline">← Scan another URL</a>
+          </div>
         </div>
 
       </main>
     </div><!-- /container -->
 
     <footer class="site-footer">
-      <div class="container">
-        Built for BCA Cybersecurity Portfolio &nbsp;·&nbsp; SecureScan v1
+      <div class="container site-footer-inner">
+        <span>Built for BCA Cybersecurity Portfolio &nbsp;·&nbsp; SecureScan v1</span>
+        <span class="footer-sep">·</span>
+        <a href="/notes" class="footer-link">Engineering Notes &amp; Limitations</a>
       </div>
     </footer>
   </div><!-- /page-wrap -->
 
-  <script src="/js/main.js?v=3"></script>
+  <script src="/js/main.js?v=12"></script>
 </body>
 </html>

@@ -8,9 +8,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/style.css?v=12" />
 </head>
 <body>
+  <!-- Keyboard skip link -->
+  <a href="#main-content" class="skip-link">Skip to main content</a>
 
   <!-- Animated background -->
   <div class="bg-canvas" aria-hidden="true">
@@ -34,7 +36,7 @@
       </header>
 
       <!-- Hero -->
-      <main class="hero" id="hero">
+      <main class="hero" id="main-content">
         <div class="hero-eyebrow">
           <span class="eyebrow-dot"></span>
           Free · No account required · Instant results
@@ -42,15 +44,121 @@
 
         <h1 class="hero-title">Scan any website's<br>security posture</h1>
         <p class="hero-sub">
-          Instantly audit HTTP headers, SSL certificates, cookie flags,
-          server info leakage, and exposed sensitive files.
+          Instant 10-point cybersecurity audit: SSL/TLS validity, cipher suites, CORS,
+          HTTP headers, cookies, mixed content, dangerous methods, SPF/DMARC, and file exposures.
         </p>
 
         <!-- Error -->
-        {% if error %}
+        {% if error and not bot_protection and not rate_limit_info %}
         <div class="alert alert-error" role="alert">
           <span class="alert-icon">⚠️</span>
           <span>{{ error }}</span>
+        </div>
+        {% endif %}
+
+        <!-- Self-Rate-Limiting Notice Card -->
+        {% if rate_limit_info %}
+        <div id="rate-limit-card" class="bot-protection-card rate-limit-card" role="region" aria-label="Scan Rate Limit Notice">
+          <div class="bot-protection-header">
+            <div class="bot-protection-badge rate-limit-badge">
+              <span class="bot-shield-icon" aria-hidden="true">⏱️</span>
+              <span>Rate Limit Active</span>
+            </div>
+            <span class="bot-protection-provider">{{ rate_limit_info.limit }} scans / min</span>
+          </div>
+
+          <div class="bot-protection-body">
+            <h2 class="bot-protection-title">Too Many Scan Requests (HTTP 429)</h2>
+            <p class="bot-protection-desc">
+              Your IP address has initiated {{ rate_limit_info.limit }} scans within the last minute. SecureScan enforces a self-rate-limit to protect shared serverless resources and prevent automated scan floods against target servers.
+            </p>
+
+            <div class="bot-protection-note">
+              <span class="bot-note-icon" aria-hidden="true">⏳</span>
+              <p>
+                <strong>Cooldown:</strong> Please wait <strong>{{ rate_limit_info.retry_after }} seconds</strong> before submitting another scan request.
+              </p>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- Anti-Bot Protection Notice Card -->
+        {% if bot_protection %}
+        <div id="bot-protection-card" class="bot-protection-card" role="region" aria-label="Anti-Bot Protection Notice">
+          <div class="bot-protection-header">
+            <div class="bot-protection-badge">
+              <span class="bot-shield-icon" aria-hidden="true">🛡️</span>
+              <span>Anti-Bot Protection Detected</span>
+            </div>
+            <span class="bot-protection-provider">{{ bot_protection.provider }}</span>
+          </div>
+
+          <div class="bot-protection-body">
+            <h2 class="bot-protection-title">Automated Audit Blocked by {{ bot_protection.provider }}</h2>
+            <p class="bot-protection-desc">
+              This site uses advanced bot protection (<strong>{{ bot_protection.provider }}</strong>) that blocks automated scanners, including this one. This does not reflect the site's security score — only that it actively blocks non-browser traffic.
+            </p>
+
+            <div class="bot-protection-note">
+              <span class="bot-note-icon" aria-hidden="true">ℹ️</span>
+              <p>
+                <strong>Expected behavior:</strong> Many industry security scanners (including Mozilla Observatory and Qualys SSL Labs) encounter this same limitation on sites with strict challenge-mode policies. Without a real browser running JavaScript to solve the challenge, an automated audit cannot be performed.
+              </p>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- Cooldown / Retry Card -->
+        {% if cooldown_info %}
+        <div
+          id="cooldown-card"
+          class="cooldown-card"
+          data-target-url="{{ cooldown_info.target_url }}"
+          data-raw-retry="{{ cooldown_info.raw_retry_after }}"
+          data-is-exact="{{ 'true' if cooldown_info.is_exact else 'false' }}"
+          role="region"
+          aria-label="WAF Rate Limit Cooldown"
+        >
+          <div class="cooldown-header">
+            <div id="cooldown-badge" class="cooldown-badge badge-blocked">
+              <span id="cooldown-badge-dot" class="poll-dot"></span>
+              <span id="cooldown-badge-text">Target WAF Block Active</span>
+            </div>
+            <span class="cooldown-target" title="{{ cooldown_info.target_url }}">{{ cooldown_info.target_url }}</span>
+          </div>
+
+          <div class="cooldown-body">
+            <div class="cooldown-timer-wrap">
+              <span class="cooldown-timer-label">Elapsed Block Time</span>
+              <div id="cooldown-elapsed" class="cooldown-timer" aria-live="polite">0m 00s</div>
+            </div>
+
+            <div class="cooldown-meta">
+              <div id="cooldown-poll-status" class="cooldown-poll-status" aria-live="polite">
+                <span class="poll-indicator-dot"></span>
+                <span id="cooldown-poll-text">Checking target in background (every 30s)...</span>
+              </div>
+
+              <p class="cooldown-disclaimer" id="cooldown-disclaimer">
+                {% if cooldown_info.is_exact %}
+                  The target server sent an explicit <code>Retry-After: {{ cooldown_info.raw_retry_after }}</code> header. Checking automatically — wait time depends entirely on the target site's own WAF policy.
+                {% else %}
+                  Checking automatically — wait time depends entirely on the target site's own WAF policy.
+                {% endif %}
+              </p>
+              
+              <div class="cooldown-actions">
+                <button type="button" id="cooldown-retry-btn" class="btn btn-outline btn-sm cooldown-retry-btn">
+                  🔄 Try Again Now
+                </button>
+                <span class="cooldown-note" id="cooldown-note">
+                  Still checking... target may still be blocked
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
         {% endif %}
 
@@ -58,6 +166,7 @@
         <form id="scan-form" action="/scan" method="POST" novalidate>
           <div class="scan-card" id="scan-card">
             <span class="scan-card-icon" aria-hidden="true">🌐</span>
+            <label for="url-input" class="sr-only">Website URL to scan</label>
             <input
               id="url-input"
               type="text"
@@ -73,31 +182,51 @@
               <span id="btn-text">Scan Now</span>
               <span id="btn-loader" hidden>
                 <span class="spinner"></span>
-                Scanning…
+                <span id="btn-loader-text">Scanning…</span>
               </span>
             </button>
           </div>
         </form>
 
-        <!-- Feature pills -->
-        <div class="feature-strip" role="list" aria-label="What we check">
+        <!-- Session Scan History on Homepage (Hidden if no history) -->
+        <div id="home-history-section" class="home-history-section" hidden aria-label="Recent scans from this session">
+          <div class="home-history-header">
+            <span class="home-history-title">
+              <span class="home-history-icon" aria-hidden="true">🕒</span> Recent in this session:
+            </span>
+            <button type="button" id="home-history-clear-btn" class="home-history-clear-btn" aria-label="Clear session history" title="Clear session history">Clear</button>
+          </div>
+          <div id="home-history-list" class="home-history-list" role="region" aria-label="Session scan history list">
+            <!-- Rendered by main.js -->
+          </div>
+        </div>
+
+        <!-- Feature pills (All 10 Checks) -->
+        <div class="feature-strip" role="list" aria-label="10 Security Checks Audited">
+          <div class="feature-pill" role="listitem"><span class="pill-icon">🔒</span> SSL/TLS Cert</div>
+          <div class="feature-pill" role="listitem"><span class="pill-icon">⚡</span> TLS &amp; Ciphers</div>
           <div class="feature-pill" role="listitem"><span class="pill-icon">🛡️</span> Security Headers</div>
-          <div class="feature-pill" role="listitem"><span class="pill-icon">🔒</span> SSL / TLS Cert</div>
+          <div class="feature-pill" role="listitem"><span class="pill-icon">🌐</span> CORS Policy</div>
           <div class="feature-pill" role="listitem"><span class="pill-icon">🍪</span> Cookie Flags</div>
-          <div class="feature-pill" role="listitem"><span class="pill-icon">🕵️</span> Server Info</div>
-          <div class="feature-pill" role="listitem"><span class="pill-icon">📁</span> Sensitive Files</div>
+          <div class="feature-pill" role="listitem"><span class="pill-icon">🔀</span> Mixed Content</div>
+          <div class="feature-pill" role="listitem"><span class="pill-icon">🚫</span> HTTP Methods</div>
+          <div class="feature-pill" role="listitem"><span class="pill-icon">✉️</span> SPF &amp; DMARC</div>
+          <div class="feature-pill" role="listitem"><span class="pill-icon">📁</span> File Exposure</div>
+          <div class="feature-pill" role="listitem"><span class="pill-icon">🕵️</span> Server Leaks</div>
         </div>
       </main>
 
     </div><!-- /container -->
 
     <footer class="site-footer">
-      <div class="container">
-        Built for BCA Cybersecurity Portfolio &nbsp;·&nbsp; SecureScan v1
+      <div class="container site-footer-inner">
+        <span>Built for BCA Cybersecurity Portfolio &nbsp;·&nbsp; SecureScan v1</span>
+        <span class="footer-sep">·</span>
+        <a href="/notes" class="footer-link">Engineering Notes &amp; Limitations</a>
       </div>
     </footer>
   </div><!-- /page-wrap -->
 
-  <script src="/js/main.js?v=3"></script>
+  <script src="/js/main.js?v=12"></script>
 </body>
 </html>
