@@ -21,21 +21,38 @@ from collections import defaultdict
 from threading import Lock
 
 import requests
-from flask import Flask, render_template, request, jsonify, redirect, make_response, g
+from flask import Flask, render_template, request, jsonify, redirect, make_response, g, session, url_for
 from OpenSSL import crypto
 
-import sys
+# Load .env in local dev (no-op in Vercel production where vars are injected natively)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
-# Resolve paths relative to this file so Vercel can find templates
-# and imported helper modules regardless of invocation directory.
-_HERE      = os.path.dirname(os.path.abspath(__file__))
-_ROOT      = os.path.abspath(os.path.join(_HERE, ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-_TEMPLATES = os.path.join(_ROOT, "templates")
+from db import get_db_connection, init_db
+from auth import (
+    hash_password, check_password,
+    create_user, get_user_by_email, get_user_by_id,
+    generate_csrf_token, validate_csrf_token,
+)
 
-app = Flask(__name__, template_folder=_TEMPLATES)
-app.secret_key = os.environ.get("SECRET_KEY", os.urandom(24))
+# static_folder='public' + static_url_path='' mirrors Vercel's CDN behaviour:
+# /css/style.css → public/css/style.css in both local dev and production.
+app = Flask(__name__, static_folder="public", static_url_path="")
+app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(24)
+
+# ── Session / Cookie Security ─────────────────────────────────────────────────
+# httponly prevents JS access to the session cookie.
+# samesite=Lax blocks CSRF via cross-origin form POSTs.
+# secure=True enforces HTTPS (set automatically to False in local dev via env check).
+_is_production = bool(os.environ.get("VERCEL"))  # Vercel sets VERCEL=1 at runtime
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=_is_production,  # True in Vercel, False locally
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # In-Memory Sliding-Window Rate Limiter
@@ -89,6 +106,10 @@ class SlidingWindowRateLimiter:
 
 
 scan_limiter = SlidingWindowRateLimiter(max_requests=10, window_seconds=60)
+
+# Login-specific rate limiter: 5 failed attempts per IP per 5 minutes.
+# Separate from the scan limiter so normal scan usage is never affected.
+login_limiter = SlidingWindowRateLimiter(max_requests=5, window_seconds=300)
 
 
 def get_client_ip() -> str:
@@ -328,15 +349,11 @@ class AuditTLSAdapter(requests.adapters.HTTPAdapter):
         return super().proxy_manager_for(*args, **kwargs)
 
 
-def safe_get(url: str, timeout: int = 9, allow_redirects: bool = True) -> requests.Response:
+def safe_get(url: str, timeout: int = 12, allow_redirects: bool = True) -> requests.Response:
     """
     HTTP GET with a shared session, explicit timeout, redirect cap,
     and standard SSL verification with fallback to AuditTLSAdapter so
     sites with certificate/protocol flaws can be audited rather than crashing.
-
-    Timeout is set to 9 s (down from 12 s on the local dev server) to leave
-    comfortable headroom under Vercel's serverless cold-start overhead while
-    still waiting long enough for legitimately slow sites.
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 SecureScan/1.0 (security-audit; github.com/NikhilPoswal/SecureScan)",
@@ -1395,6 +1412,11 @@ def add_security_headers(response):
 
 @app.route("/")
 def index():
+    """Homepage. Initialises DB schema on first cold start if DATABASE_URL is set."""
+    try:
+        init_db()
+    except Exception:
+        pass  # DB not configured — anonymous scan flow continues unaffected
     return render_template("index.html")
 
 
@@ -1455,7 +1477,6 @@ def test_pdf():
     resp.headers["Content-Type"] = "application/pdf"
     resp.headers["Content-Disposition"] = 'attachment; filename="securescan_test.pdf"'
     return resp
-
 
 
 @app.route("/check-status", methods=["GET", "POST"])
@@ -1553,7 +1574,7 @@ def handle_rate_limited(raw_url: str, retry_after: int, client_ip: str):
     return resp
 
 
-def audit_target(raw_url: str, timeout: int = 9) -> dict:
+def audit_target(raw_url: str, timeout: int = 12) -> dict:
     """
     Executes a complete 10-point cybersecurity audit for a single URL.
     Returns a dictionary with 'success': True and audit metrics, or 'success': False
@@ -1845,6 +1866,197 @@ def audit_target(raw_url: str, timeout: int = 9) -> dict:
     }
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Flask Request Lifecycle Hooks
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.before_request
+def load_logged_in_user():
+    """
+    Runs before every request.
+    If a user_id is in the session (set on login), fetches the user row
+    from the DB and stores it in g.current_user so templates can access it.
+    If DATABASE_URL is not set (e.g. local dev without DB), silently skips.
+    """
+    g.current_user = None
+    user_id = session.get("user_id")
+    if user_id:
+        try:
+            g.current_user = get_user_by_id(user_id)
+        except Exception:
+            # DB unavailable or connection error — clear the stale session
+            session.clear()
+            g.current_user = None
+
+
+@app.context_processor
+def inject_current_user():
+    """Make current_user available in all Jinja2 templates as {{ current_user }}."""
+    return {"current_user": getattr(g, "current_user", None)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Authentication Routes (Batch 1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """
+    GET:  Render the login form.
+    POST: Authenticate the user.
+          - CSRF token is validated first.
+          - Login attempt rate is limited per IP (5 failures / 5 min).
+          - Passwords are verified with constant-time comparison.
+          - On success: session is regenerated (cleared + new user_id set).
+    """
+    # Already logged in → send to home
+    if g.current_user:
+        return redirect("/")
+
+    if request.method == "GET":
+        csrf_token = generate_csrf_token(session)
+        return render_template("login.html", csrf_token=csrf_token)
+
+    # POST — validate CSRF first
+    form_csrf = request.form.get("_csrf_token")
+    if not validate_csrf_token(session, form_csrf):
+        return render_template("login.html",
+                               csrf_token=generate_csrf_token(session),
+                               error="Invalid form submission. Please try again."), 400
+
+    email    = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+
+    if not email or not password:
+        return render_template("login.html",
+                               csrf_token=generate_csrf_token(session),
+                               prefill_email=email,
+                               error="Email and password are required.")
+
+    # Check login rate limit (keyed on IP to resist credential-stuffing)
+    client_ip = get_client_ip()
+    allowed, retry_after, _ = login_limiter.is_allowed(client_ip)
+    if not allowed:
+        return render_template("login.html",
+                               csrf_token=generate_csrf_token(session),
+                               prefill_email=email,
+                               error=f"Too many failed login attempts. "
+                                     f"Please wait {retry_after} seconds before trying again."), 429
+
+    # Fetch user and verify password
+    try:
+        user = get_user_by_email(email)
+    except Exception:
+        return render_template("login.html",
+                               csrf_token=generate_csrf_token(session),
+                               prefill_email=email,
+                               error="Database temporarily unavailable. Please try again shortly."), 503
+
+    if user is None or not check_password(password, user["password_hash"]):
+        # Intentionally generic message (don't reveal whether the email exists)
+        return render_template("login.html",
+                               csrf_token=generate_csrf_token(session),
+                               prefill_email=email,
+                               error="Incorrect email or password.")
+
+    # Success: regenerate session (clear old data, set user_id)
+    session.clear()
+    session["user_id"] = user["id"]
+    return redirect("/")
+
+
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    """
+    GET:  Render the sign-up form.
+    POST: Create a new account.
+          - Validates email format, password length (≥8), and password match.
+          - Parameterized INSERT via auth.create_user() prevents SQLi.
+          - On duplicate email: returns a clear error (no info disclosure beyond the email itself).
+          - On success: logs the user in immediately (same as post-login flow).
+    """
+    if g.current_user:
+        return redirect("/")
+
+    if request.method == "GET":
+        csrf_token = generate_csrf_token(session)
+        return render_template("signup.html", csrf_token=csrf_token)
+
+    # POST — validate CSRF first
+    form_csrf = request.form.get("_csrf_token")
+    if not validate_csrf_token(session, form_csrf):
+        return render_template("signup.html",
+                               csrf_token=generate_csrf_token(session),
+                               error="Invalid form submission. Please try again."), 400
+
+    email     = request.form.get("email", "").strip().lower()
+    password  = request.form.get("password", "")
+    password2 = request.form.get("password2", "")
+
+    # Server-side validation (client-side is convenience only)
+    _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    if not email or not _EMAIL_RE.match(email):
+        return render_template("signup.html",
+                               csrf_token=generate_csrf_token(session),
+                               prefill_email=email,
+                               error="Please enter a valid email address.")
+
+    if len(password) < 8:
+        return render_template("signup.html",
+                               csrf_token=generate_csrf_token(session),
+                               prefill_email=email,
+                               error="Password must be at least 8 characters.")
+
+    if password != password2:
+        return render_template("signup.html",
+                               csrf_token=generate_csrf_token(session),
+                               prefill_email=email,
+                               error="Passwords do not match.")
+
+    # Initialise DB schema on first-ever signup (idempotent)
+    try:
+        init_db()
+        user = create_user(email, password)
+    except ValueError as e:
+        # Duplicate email
+        return render_template("signup.html",
+                               csrf_token=generate_csrf_token(session),
+                               prefill_email=email,
+                               error=str(e))
+    except Exception:
+        return render_template("signup.html",
+                               csrf_token=generate_csrf_token(session),
+                               prefill_email=email,
+                               error="Account creation failed due to a database error. Please try again."), 503
+
+    # Log the new user in immediately
+    session.clear()
+    session["user_id"] = user["id"]
+    return redirect("/")
+
+
+@app.route("/logout")
+def logout():
+    """Clear the session and redirect to the homepage."""
+    session.clear()
+    return redirect("/")
+
+
+@app.route("/account")
+def account():
+    """
+    Account overview page — shows the logged-in user's email and member-since date.
+    Redirects to /login if the user is not authenticated.
+    No sensitive operations happen here (read-only); CSRF not required.
+    """
+    if not g.current_user:
+        return redirect("/login")
+    return render_template("account.html")
+
+
+
 @app.route("/scan", methods=["GET", "POST"])
 def scan():
     if request.method == "GET":
@@ -1867,7 +2079,7 @@ def scan():
     if not raw_url:
         return render_template("index.html", error="Please enter a URL to scan.")
 
-    result = audit_target(raw_url, timeout=9)
+    result = audit_target(raw_url, timeout=12)
     if not result["success"]:
         return render_template(
             "index.html",
@@ -1937,8 +2149,8 @@ def api_scan():
         resp.headers["X-RateLimit-Remaining"] = str(remaining)
         return resp
 
-    # Run the unified audit engine (timeout=9 for Vercel serverless budget)
-    res = audit_target(raw_url, timeout=9)
+    # Run the unified audit engine (timeout=12)
+    res = audit_target(raw_url, timeout=12)
 
     if not res["success"]:
         # Case 1: Bot-protection challenge (Cloudflare Turnstile, AWS WAF, etc.)
@@ -2009,6 +2221,5 @@ def api_scan():
     return resp
 
 
-# Vercel imports `app` directly — no __main__ guard needed.
-# For local development, run app.py instead.
-
+if __name__ == "__main__":
+    app.run(debug=True)

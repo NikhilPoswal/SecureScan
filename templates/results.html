@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/style.css?v=12" />
+  <link rel="stylesheet" href="/css/style.css?v=14" />
 </head>
 <body>
   <!-- Keyboard skip link -->
@@ -70,6 +70,22 @@
           </form>
           {% endif %}
           <a href="/" class="btn btn-outline btn-sm">← New Scan</a>
+          {% if current_user %}
+          <div class="nav-user-wrap" id="nav-user-wrap">
+            <button type="button" id="nav-user-btn" class="nav-user-btn" aria-expanded="false" aria-haspopup="true" aria-controls="nav-user-dropdown" aria-label="Account menu">
+              <span class="nav-user-avatar" aria-hidden="true">{{ current_user.email[0].upper() }}</span>
+              <span class="nav-user-email">{{ current_user.email }}</span>
+              <span class="nav-user-caret" aria-hidden="true">▾</span>
+            </button>
+            <div id="nav-user-dropdown" class="nav-user-dropdown" role="menu" hidden>
+              <div class="nav-dropdown-email" title="{{ current_user.email }}">{{ current_user.email }}</div>
+              <a href="/account" class="nav-dropdown-item" role="menuitem">👤 Account</a>
+              <a href="/logout" class="nav-dropdown-item danger" role="menuitem">🚪 Log out</a>
+            </div>
+          </div>
+          {% else %}
+          <a href="/login" class="nav-auth-link">Log in</a>
+          {% endif %}
         </div>
       </header>
 
@@ -557,6 +573,23 @@
     </footer>
   </div><!-- /page-wrap -->
 
-  <script src="/js/main.js?v=12"></script>
+  <script src="/js/main.js?v=13"></script>
+  <script>
+    const navUserBtn = document.getElementById('nav-user-btn');
+    const navUserDropdown = document.getElementById('nav-user-dropdown');
+    if (navUserBtn && navUserDropdown) {
+      navUserBtn.addEventListener('click', () => {
+        const isOpen = !navUserDropdown.hidden;
+        navUserDropdown.hidden = isOpen;
+        navUserBtn.setAttribute('aria-expanded', String(!isOpen));
+      });
+      document.addEventListener('click', (e) => {
+        if (!navUserBtn.contains(e.target) && !navUserDropdown.contains(e.target)) {
+          navUserDropdown.hidden = true;
+          navUserBtn.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+  </script>
 </body>
 </html>

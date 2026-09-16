@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Log In — SecureScan</title>
+  <meta name="description" content="Log in to your SecureScan account to access your saved scans and history." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css?v=14" />
+</head>
+<body>
+  <!-- Keyboard skip link -->
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
+  <!-- Animated background -->
+  <div class="bg-canvas" aria-hidden="true">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div class="page-wrap">
+    <div class="container">
+
+      <!-- Topbar -->
+      <header class="topbar">
+        <a href="/" class="logo" aria-label="SecureScan home">
+          <div class="logo-mark" aria-hidden="true">🔍</div>
+          <span class="logo-wordmark">SecureScan</span>
+        </a>
+        <nav>
+          <a href="/signup" class="btn btn-outline btn-sm">Create account</a>
+        </nav>
+      </header>
+
+      <!-- Auth card -->
+      <main class="auth-main" id="main-content">
+        <div class="auth-card">
+
+          <!-- Card header -->
+          <div class="auth-card-header">
+            <span class="auth-icon" aria-hidden="true">🔐</span>
+            <h1 class="auth-title">Welcome back</h1>
+            <p class="auth-subtitle">Log in to your SecureScan account</p>
+          </div>
+
+          <!-- Error message -->
+          {% if error %}
+          <div class="alert alert-error" role="alert">
+            <span class="alert-icon">⚠️</span>
+            <span>{{ error }}</span>
+          </div>
+          {% endif %}
+
+          <!-- Login form -->
+          <form id="login-form" method="POST" action="/login" novalidate class="auth-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}" />
+
+            <div class="auth-field">
+              <label for="email" class="auth-label">Email address</label>
+              <input
+                id="email"
+                type="email"
+                name="email"
+                class="auth-input"
+                placeholder="you@example.com"
+                value="{{ prefill_email or '' }}"
+                autocomplete="email"
+                required
+                aria-required="true"
+              />
+            </div>
+
+            <div class="auth-field">
+              <label for="password" class="auth-label">Password</label>
+              <div class="auth-input-wrap">
+                <input
+                  id="password"
+                  type="password"
+                  name="password"
+                  class="auth-input"
+                  placeholder="••••••••"
+                  autocomplete="current-password"
+                  required
+                  aria-required="true"
+                />
+                <button type="button" class="auth-toggle-pw" id="toggle-pw" aria-label="Show password">
+                  <span id="toggle-pw-icon" aria-hidden="true">👁️</span>
+                </button>
+              </div>
+            </div>
+
+            <button type="submit" id="login-btn" class="btn btn-primary auth-submit">
+              <span id="login-btn-text">Log In</span>
+              <span id="login-btn-loader" hidden>
+                <span class="spinner"></span>
+                <span>Signing in…</span>
+              </span>
+            </button>
+          </form>
+
+          <div class="auth-footer">
+            <span class="auth-footer-text">Don't have an account?</span>
+            <a href="/signup" class="auth-footer-link">Create one — it's free</a>
+          </div>
+
+        </div><!-- /auth-card -->
+      </main>
+
+    </div><!-- /container -->
+
+    <footer class="site-footer">
+      <div class="container site-footer-inner">
+        <span>Built for BCA Cybersecurity Portfolio &nbsp;·&nbsp; SecureScan v1</span>
+        <span class="footer-sep">·</span>
+        <a href="/notes" class="footer-link">Engineering Notes &amp; Limitations</a>
+      </div>
+    </footer>
+  </div><!-- /page-wrap -->
+
+  <script>
+    // Password visibility toggle
+    const toggleBtn = document.getElementById('toggle-pw');
+    const pwInput   = document.getElementById('password');
+    const toggleIcon = document.getElementById('toggle-pw-icon');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => {
+        const isHidden = pwInput.type === 'password';
+        pwInput.type = isHidden ? 'text' : 'password';
+        toggleIcon.textContent = isHidden ? '🙈' : '👁️';
+        toggleBtn.setAttribute('aria-label', isHidden ? 'Hide password' : 'Show password');
+      });
+    }
+
+    // Loading state on submit
+    const loginForm = document.getElementById('login-form');
+    const loginBtn  = document.getElementById('login-btn');
+    const loginText = document.getElementById('login-btn-text');
+    const loginLoader = document.getElementById('login-btn-loader');
+    if (loginForm) {
+      loginForm.addEventListener('submit', () => {
+        loginText.hidden = true;
+        loginLoader.hidden = false;
+        loginBtn.disabled = true;
+      });
+    }
+  </script>
+</body>
+</html>

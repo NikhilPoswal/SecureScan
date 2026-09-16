@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Create Account — SecureScan</title>
+  <meta name="description" content="Create a free SecureScan account to save and track your website security scans." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css?v=14" />
+</head>
+<body>
+  <!-- Keyboard skip link -->
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
+  <!-- Animated background -->
+  <div class="bg-canvas" aria-hidden="true">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div class="page-wrap">
+    <div class="container">
+
+      <!-- Topbar -->
+      <header class="topbar">
+        <a href="/" class="logo" aria-label="SecureScan home">
+          <div class="logo-mark" aria-hidden="true">🔍</div>
+          <span class="logo-wordmark">SecureScan</span>
+        </a>
+        <nav>
+          <a href="/login" class="btn btn-outline btn-sm">Log in</a>
+        </nav>
+      </header>
+
+      <!-- Auth card -->
+      <main class="auth-main" id="main-content">
+        <div class="auth-card">
+
+          <!-- Card header -->
+          <div class="auth-card-header">
+            <span class="auth-icon" aria-hidden="true">🛡️</span>
+            <h1 class="auth-title">Create your account</h1>
+            <p class="auth-subtitle">Free · Instant · No credit card</p>
+          </div>
+
+          <!-- Error / success message -->
+          {% if error %}
+          <div class="alert alert-error" role="alert">
+            <span class="alert-icon">⚠️</span>
+            <span>{{ error }}</span>
+          </div>
+          {% endif %}
+
+          <!-- Signup form -->
+          <form id="signup-form" method="POST" action="/signup" novalidate class="auth-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}" />
+
+            <div class="auth-field">
+              <label for="email" class="auth-label">Email address</label>
+              <input
+                id="email"
+                type="email"
+                name="email"
+                class="auth-input"
+                placeholder="you@example.com"
+                value="{{ prefill_email or '' }}"
+                autocomplete="email"
+                required
+                aria-required="true"
+              />
+            </div>
+
+            <div class="auth-field">
+              <label for="password" class="auth-label">
+                Password
+                <span class="auth-label-hint" id="pw-hint" aria-live="polite"></span>
+              </label>
+              <div class="auth-input-wrap">
+                <input
+                  id="password"
+                  type="password"
+                  name="password"
+                  class="auth-input"
+                  placeholder="At least 8 characters"
+                  autocomplete="new-password"
+                  minlength="8"
+                  required
+                  aria-required="true"
+                  aria-describedby="pw-hint"
+                />
+                <button type="button" class="auth-toggle-pw" id="toggle-pw" aria-label="Show password">
+                  <span id="toggle-pw-icon" aria-hidden="true">👁️</span>
+                </button>
+              </div>
+              <!-- Password strength bar -->
+              <div class="pw-strength-bar" aria-hidden="true">
+                <div id="pw-strength-fill" class="pw-strength-fill"></div>
+              </div>
+            </div>
+
+            <div class="auth-field">
+              <label for="password2" class="auth-label">
+                Confirm password
+                <span class="auth-label-hint auth-label-match" id="pw-match-hint" aria-live="polite"></span>
+              </label>
+              <input
+                id="password2"
+                type="password"
+                name="password2"
+                class="auth-input"
+                placeholder="Repeat your password"
+                autocomplete="new-password"
+                required
+                aria-required="true"
+                aria-describedby="pw-match-hint"
+              />
+            </div>
+
+            <button type="submit" id="signup-btn" class="btn btn-primary auth-submit">
+              <span id="signup-btn-text">Create Account</span>
+              <span id="signup-btn-loader" hidden>
+                <span class="spinner"></span>
+                <span>Creating account…</span>
+              </span>
+            </button>
+          </form>
+
+          <div class="auth-footer">
+            <span class="auth-footer-text">Already have an account?</span>
+            <a href="/login" class="auth-footer-link">Log in</a>
+          </div>
+
+        </div><!-- /auth-card -->
+      </main>
+
+    </div><!-- /container -->
+
+    <footer class="site-footer">
+      <div class="container site-footer-inner">
+        <span>Built for BCA Cybersecurity Portfolio &nbsp;·&nbsp; SecureScan v1</span>
+        <span class="footer-sep">·</span>
+        <a href="/notes" class="footer-link">Engineering Notes &amp; Limitations</a>
+      </div>
+    </footer>
+  </div><!-- /page-wrap -->
+
+  <script>
+    // ── Password visibility toggle ──────────────────────────────────────────
+    const toggleBtn  = document.getElementById('toggle-pw');
+    const pwInput    = document.getElementById('password');
+    const toggleIcon = document.getElementById('toggle-pw-icon');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => {
+        const isHidden = pwInput.type === 'password';
+        pwInput.type = isHidden ? 'text' : 'password';
+        toggleIcon.textContent = isHidden ? '🙈' : '👁️';
+        toggleBtn.setAttribute('aria-label', isHidden ? 'Hide password' : 'Show password');
+      });
+    }
+
+    // ── Password strength indicator ─────────────────────────────────────────
+    const pwHint    = document.getElementById('pw-hint');
+    const pwFill    = document.getElementById('pw-strength-fill');
+
+    function getStrength(pw) {
+      let score = 0;
+      if (pw.length >= 8)  score++;
+      if (pw.length >= 12) score++;
+      if (/[A-Z]/.test(pw)) score++;
+      if (/[0-9]/.test(pw)) score++;
+      if (/[^A-Za-z0-9]/.test(pw)) score++;
+      return score; // 0–5
+    }
+
+    const strengthLabels = ['', 'Very weak', 'Weak', 'Fair', 'Strong', 'Very strong'];
+    const strengthClasses = ['', 'pw-strength-1', 'pw-strength-2', 'pw-strength-3', 'pw-strength-4', 'pw-strength-5'];
+
+    if (pwInput && pwFill) {
+      pwInput.addEventListener('input', () => {
+        const s = getStrength(pwInput.value);
+        pwFill.style.width = (s / 5 * 100) + '%';
+        pwFill.className = 'pw-strength-fill ' + (strengthClasses[s] || '');
+        if (pwInput.value.length > 0) {
+          pwHint.textContent = strengthLabels[s] || '';
+        } else {
+          pwHint.textContent = '';
+        }
+      });
+    }
+
+    // ── Password match indicator ────────────────────────────────────────────
+    const pw2Input   = document.getElementById('password2');
+    const matchHint  = document.getElementById('pw-match-hint');
+
+    function checkMatch() {
+      if (!pw2Input.value) { matchHint.textContent = ''; return; }
+      if (pw2Input.value === pwInput.value) {
+        matchHint.textContent = '✓ Matches';
+        matchHint.className = 'auth-label-hint auth-label-match match-ok';
+      } else {
+        matchHint.textContent = '✗ Doesn\'t match';
+        matchHint.className = 'auth-label-hint auth-label-match match-fail';
+      }
+    }
+
+    if (pw2Input) {
+      pw2Input.addEventListener('input', checkMatch);
+      pwInput.addEventListener('input', () => { if (pw2Input.value) checkMatch(); });
+    }
+
+    // ── Client-side submit validation ───────────────────────────────────────
+    const signupForm   = document.getElementById('signup-form');
+    const signupBtn    = document.getElementById('signup-btn');
+    const signupText   = document.getElementById('signup-btn-text');
+    const signupLoader = document.getElementById('signup-btn-loader');
+
+    if (signupForm) {
+      signupForm.addEventListener('submit', (e) => {
+        const pw  = pwInput.value;
+        const pw2 = pw2Input.value;
+
+        if (pw.length < 8) {
+          e.preventDefault();
+          pwInput.focus();
+          pwHint.textContent = 'Must be at least 8 characters';
+          return;
+        }
+        if (pw !== pw2) {
+          e.preventDefault();
+          pw2Input.focus();
+          matchHint.textContent = '✗ Passwords do not match';
+          matchHint.className = 'auth-label-hint auth-label-match match-fail';
+          return;
+        }
+
+        signupText.hidden = true;
+        signupLoader.hidden = false;
+        signupBtn.disabled = true;
+      });
+    }
+  </script>
+</body>
+</html>
