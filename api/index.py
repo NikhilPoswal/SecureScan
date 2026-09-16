@@ -42,7 +42,10 @@ try:
 except ImportError:
     pass
 
-from db import get_db_connection, init_db
+from db import (
+    get_db_connection, init_db,
+    save_scan, get_user_scans, get_scan_by_id, delete_scan,
+)
 from auth import (
     hash_password, check_password,
     create_user, get_user_by_email, get_user_by_id,
@@ -2067,6 +2070,108 @@ def account():
     return render_template("account.html")
 
 
+@app.route("/dashboard")
+def dashboard():
+    """
+    Dashboard of saved scans for the authenticated user.
+    Redirects to /login if not authenticated.
+    Supports pagination: ?page=1 (20 scans per page).
+    """
+    if not g.current_user:
+        return redirect("/login")
+
+    try:
+        page = int(request.args.get("page", 1))
+        if page < 1:
+            page = 1
+    except (ValueError, TypeError):
+        page = 1
+
+    per_page = 20
+    offset = (page - 1) * per_page
+
+    try:
+        scans, total = get_user_scans(g.current_user["id"], limit=per_page, offset=offset)
+    except Exception as e:
+        app.logger.error(f"Failed to load user scans: {e}")
+        scans, total = [], 0
+
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    csrf_token = generate_csrf_token(session)
+
+    return render_template(
+        "dashboard.html",
+        scans=scans,
+        total=total,
+        page=page,
+        total_pages=total_pages,
+        csrf_token=csrf_token,
+    )
+
+
+@app.route("/dashboard/scan/<int:scan_id>")
+def view_saved_scan(scan_id: int):
+    """
+    View full results of a saved scan.
+    Strictly authorized to the logged-in user: returns 404 if not found or belongs to another user.
+    Reuses results.html for identical visual presentation.
+    """
+    if not g.current_user:
+        return redirect("/login")
+
+    scan = get_scan_by_id(scan_id, user_id=g.current_user["id"])
+    if not scan:
+        return render_template("index.html", error="Scan not found or access denied."), 404
+
+    results_data = scan.get("results_json", {})
+    checks = results_data.get("checks", [])
+    report_json_b64 = results_data.get("report_json_b64") or ""
+    if not report_json_b64:
+        report_dict = results_data.get("report_dict") or {
+            "url": scan["url"],
+            "final_url": scan["final_url"],
+            "score": scan["score"],
+            "grade": scan["grade"],
+            "timestamp": scan["created_at"].strftime("%Y-%m-%d %H:%M UTC") if hasattr(scan["created_at"], "strftime") else str(scan["created_at"]),
+            "checks": checks,
+        }
+        report_json_b64 = base64.b64encode(json.dumps(report_dict).encode("utf-8")).decode("ascii")
+
+    return render_template(
+        "results.html",
+        url=scan["url"],
+        final_url=scan["final_url"],
+        score=scan["score"],
+        grade=scan["grade"],
+        checks=checks,
+        report_json_b64=report_json_b64,
+        is_saved_scan=True,
+        saved_scan_id=scan["id"],
+    )
+
+
+@app.route("/dashboard/scan/<int:scan_id>/delete", methods=["POST"])
+def delete_saved_scan(scan_id: int):
+    """
+    Delete a saved scan with CSRF validation.
+    Strictly authorized to the logged-in user: returns 404 if scan belongs to another user.
+    """
+    if not g.current_user:
+        return redirect("/login")
+
+    form_csrf = request.form.get("_csrf_token")
+    if not validate_csrf_token(session, form_csrf):
+        return render_template("dashboard.html",
+                               error="Invalid CSRF token for deletion. Please try again.",
+                               scans=[], total=0, page=1, total_pages=1,
+                               csrf_token=generate_csrf_token(session)), 400
+
+    deleted = delete_scan(scan_id, user_id=g.current_user["id"])
+    if not deleted:
+        return render_template("index.html", error="Scan not found or access denied."), 404
+
+    return redirect("/dashboard")
+
 
 @app.route("/scan", methods=["GET", "POST"])
 def scan():
@@ -2100,6 +2205,21 @@ def scan():
             prefill=raw_url,
         )
 
+    # Automatically save scan if user is logged in (Batch 2)
+    saved_scan_id = None
+    if g.current_user:
+        try:
+            saved_scan_id = save_scan(
+                user_id=g.current_user["id"],
+                url=result["raw_url"],
+                final_url=result["final_url"],
+                score=result["score"],
+                grade=result["grade"],
+                results_data=result,
+            )
+        except Exception as e:
+            app.logger.error(f"Failed to auto-save scan: {e}")
+
     resp = make_response(
         render_template(
             "results.html",
@@ -2109,6 +2229,7 @@ def scan():
             grade=result["grade"],
             checks=result["checks"],
             report_json_b64=result["report_json_b64"],
+            saved_scan_id=saved_scan_id,
         )
     )
     resp.headers["X-RateLimit-Limit"] = str(scan_limiter.max_requests)

@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard — SecureScan</title>
+  <meta name="description" content="View and manage your saved website security audit scans." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css?v=14" />
+</head>
+<body>
+  <!-- Keyboard skip link -->
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
+  <!-- Animated background canvas -->
+  <div class="bg-canvas" aria-hidden="true">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div class="page-wrap">
+    <div class="container">
+
+      <!-- Topbar -->
+      <header class="topbar">
+        <a href="/" class="logo" aria-label="SecureScan home">
+          <div class="logo-mark" aria-hidden="true">🔍</div>
+          <span class="logo-wordmark">SecureScan</span>
+        </a>
+        <nav class="topbar-nav">
+          <a href="/" class="btn btn-outline btn-sm">← New Scan</a>
+          <div class="nav-user-wrap" id="nav-user-wrap">
+            <button
+              type="button"
+              id="nav-user-btn"
+              class="nav-user-btn"
+              aria-expanded="false"
+              aria-haspopup="true"
+              aria-controls="nav-user-dropdown"
+              aria-label="Account menu"
+            >
+              <span class="nav-user-avatar" aria-hidden="true">{{ current_user.email[0].upper() }}</span>
+              <span class="nav-user-email">{{ current_user.email }}</span>
+              <span class="nav-user-caret" aria-hidden="true">▾</span>
+            </button>
+            <div id="nav-user-dropdown" class="nav-user-dropdown" role="menu" hidden>
+              <div class="nav-dropdown-email" title="{{ current_user.email }}">{{ current_user.email }}</div>
+              <a href="/dashboard" class="nav-dropdown-item active" role="menuitem">📊 Dashboard</a>
+              <a href="/account" class="nav-dropdown-item" role="menuitem">👤 Account</a>
+              <a href="/logout" class="nav-dropdown-item danger" role="menuitem">🚪 Log out</a>
+            </div>
+          </div>
+        </nav>
+      </header>
+
+      <!-- Dashboard Main -->
+      <main class="dashboard-main" id="main-content">
+
+        <!-- Dashboard Header -->
+        <div class="dashboard-header">
+          <div class="dashboard-header-text">
+            <div class="badge-pill">
+              <span class="badge-dot" aria-hidden="true"></span>
+              Audit History &amp; Saved Reports
+            </div>
+            <h1 class="dashboard-title">Saved Scans</h1>
+            <p class="dashboard-subtitle">
+              Permanent security scan results saved to your SecureScan account.
+            </p>
+          </div>
+          <div class="dashboard-header-action">
+            <a href="/" class="btn btn-primary">
+              <span aria-hidden="true">🔍</span> Run New Scan
+            </a>
+          </div>
+        </div>
+
+        {% if error %}
+        <div class="alert alert-error" role="alert" style="margin-bottom: 24px;">
+          <span class="alert-icon" aria-hidden="true">⚠️</span>
+          <span class="alert-text">{{ error }}</span>
+        </div>
+        {% endif %}
+
+        {% if total == 0 %}
+        <!-- Empty State -->
+        <div class="dashboard-empty-card" id="dashboard-empty-state">
+          <div class="empty-icon-wrap" aria-hidden="true">🛡️</div>
+          <h2 class="empty-title">No saved scans yet</h2>
+          <p class="empty-desc">
+            Whenever you run a website security scan while signed in, the full 10-point audit
+            report is automatically preserved here permanently.
+          </p>
+          <a href="/" class="btn btn-primary empty-btn">
+            🔍 Run Your First Scan
+          </a>
+        </div>
+
+        {% else %}
+        <!-- Meta summary -->
+        <div class="dashboard-stats-bar">
+          <div class="dashboard-stat">
+            <span class="dashboard-stat-label">Total Audits</span>
+            <span class="dashboard-stat-value" id="total-scans-count">{{ total }}</span>
+          </div>
+          <div class="dashboard-stat">
+            <span class="dashboard-stat-label">Current Page</span>
+            <span class="dashboard-stat-value">{{ page }} of {{ total_pages }}</span>
+          </div>
+        </div>
+
+        <!-- Scans List -->
+        <div class="dashboard-scans-list" role="list" aria-label="Saved security audits">
+          {% for s in scans %}
+          <div class="saved-scan-card" role="listitem" id="scan-row-{{ s.id }}">
+            <div class="saved-scan-left">
+              <!-- Grade badge -->
+              <div class="scan-grade-badge grade-{{ s.grade | lower }}" aria-label="Grade {{ s.grade }}, Score {{ s.score }} out of 100">
+                <span class="scan-grade-letter">{{ s.grade }}</span>
+                <span class="scan-grade-score">{{ s.score }}</span>
+              </div>
+
+              <!-- Info -->
+              <div class="saved-scan-info">
+                <a href="/dashboard/scan/{{ s.id }}" class="saved-scan-url" title="{{ s.url }}">
+                  {{ s.url }}
+                </a>
+                <div class="saved-scan-meta">
+                  <span class="saved-scan-final" title="{{ s.final_url }}">
+                    🔗 {{ s.final_url }}
+                  </span>
+                  <span class="meta-sep" aria-hidden="true">·</span>
+                  <span class="saved-scan-date">
+                    🕒 {{ s.created_at.strftime('%b %d, %Y · %H:%M UTC') if s.created_at.strftime is defined else s.created_at }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="saved-scan-actions">
+              <a href="/dashboard/scan/{{ s.id }}" class="btn btn-outline btn-sm scan-btn-view" id="view-scan-btn-{{ s.id }}">
+                View Report
+              </a>
+              <button
+                type="button"
+                class="btn btn-danger-outline btn-sm scan-btn-delete"
+                id="delete-scan-btn-{{ s.id }}"
+                data-scan-id="{{ s.id }}"
+                data-scan-url="{{ s.url }}"
+                aria-label="Delete scan for {{ s.url }}"
+              >
+                🗑️ Delete
+              </button>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <!-- Pagination -->
+        {% if total_pages > 1 %}
+        <nav class="dashboard-pagination" aria-label="Dashboard pagination">
+          {% if page > 1 %}
+          <a href="/dashboard?page={{ page - 1 }}" class="btn btn-outline btn-sm pagination-link" id="prev-page-btn">
+            ← Previous
+          </a>
+          {% else %}
+          <span class="btn btn-outline btn-sm pagination-disabled" aria-disabled="true">
+            ← Previous
+          </span>
+          {% endif %}
+
+          <span class="pagination-info" aria-current="page">
+            Page {{ page }} of {{ total_pages }}
+          </span>
+
+          {% if page < total_pages %}
+          <a href="/dashboard?page={{ page + 1 }}" class="btn btn-outline btn-sm pagination-link" id="next-page-btn">
+            Next →
+          </a>
+          {% else %}
+          <span class="btn btn-outline btn-sm pagination-disabled" aria-disabled="true">
+            Next →
+          </span>
+          {% endif %}
+        </nav>
+        {% endif %}
+
+        {% endif %}
+
+      </main>
+
+    </div><!-- /container -->
+
+    <footer class="site-footer">
+      <div class="container site-footer-inner">
+        <span>Built for BCA Cybersecurity Portfolio &nbsp;·&nbsp; SecureScan v1</span>
+        <span class="footer-sep">·</span>
+        <a href="/notes" class="footer-link">Engineering Notes &amp; Limitations</a>
+      </div>
+    </footer>
+  </div><!-- /page-wrap -->
+
+  <!-- Delete Confirmation Modal -->
+  <div id="delete-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="modal-icon" aria-hidden="true">🗑️</span>
+        <h2 class="modal-title" id="modal-title">Delete Saved Scan?</h2>
+      </div>
+      <p class="modal-desc">
+        Are you sure you want to permanently delete the audit record for
+        <strong id="modal-target-url"></strong>?
+        This action cannot be undone.
+      </p>
+      <form id="delete-scan-form" method="POST" action="">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}" />
+        <div class="modal-actions">
+          <button type="button" id="modal-cancel-btn" class="btn btn-outline">
+            Cancel
+          </button>
+          <button type="submit" id="modal-confirm-delete-btn" class="btn btn-danger">
+            Delete Record
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    // Nav user dropdown toggle
+    const navUserBtn = document.getElementById('nav-user-btn');
+    const navUserDropdown = document.getElementById('nav-user-dropdown');
+    if (navUserBtn && navUserDropdown) {
+      navUserBtn.addEventListener('click', () => {
+        const isOpen = !navUserDropdown.hidden;
+        navUserDropdown.hidden = isOpen;
+        navUserBtn.setAttribute('aria-expanded', String(!isOpen));
+      });
+      document.addEventListener('click', (e) => {
+        if (!navUserBtn.contains(e.target) && !navUserDropdown.contains(e.target)) {
+          navUserDropdown.hidden = true;
+          navUserBtn.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+
+    // Delete confirmation modal logic
+    const deleteModal = document.getElementById('delete-modal');
+    const deleteForm = document.getElementById('delete-scan-form');
+    const modalTargetUrl = document.getElementById('modal-target-url');
+    const modalCancelBtn = document.getElementById('modal-cancel-btn');
+
+    document.querySelectorAll('.scan-btn-delete').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const scanId = btn.getAttribute('data-scan-id');
+        const scanUrl = btn.getAttribute('data-scan-url');
+        deleteForm.action = '/dashboard/scan/' + encodeURIComponent(scanId) + '/delete';
+        modalTargetUrl.textContent = scanUrl;
+        deleteModal.hidden = false;
+        modalCancelBtn.focus();
+      });
+    });
+
+    if (modalCancelBtn) {
+      modalCancelBtn.addEventListener('click', () => {
+        deleteModal.hidden = true;
+      });
+    }
+
+    if (deleteModal) {
+      deleteModal.addEventListener('click', (e) => {
+        if (e.target === deleteModal) {
+          deleteModal.hidden = true;
+        }
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !deleteModal.hidden) {
+          deleteModal.hidden = true;
+        }
+      });
+    }
+  </script>
+</body>
+</html>
