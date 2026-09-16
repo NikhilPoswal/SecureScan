@@ -24,10 +24,21 @@ import requests
 from flask import Flask, render_template, request, jsonify, redirect, make_response, g, session, url_for
 from OpenSSL import crypto
 
+import sys
+
+# Resolve paths relative to this file so Vercel can find templates
+# and imported helper modules regardless of invocation directory.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.abspath(os.path.join(_HERE, "..")) if os.path.basename(_HERE) == "api" else _HERE
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+_TEMPLATES = os.path.join(_ROOT, "templates")
+_PUBLIC = os.path.join(_ROOT, "public")
+
 # Load .env in local dev (no-op in Vercel production where vars are injected natively)
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(os.path.join(_ROOT, ".env"))
 except ImportError:
     pass
 
@@ -40,7 +51,7 @@ from auth import (
 
 # static_folder='public' + static_url_path='' mirrors Vercel's CDN behaviour:
 # /css/style.css → public/css/style.css in both local dev and production.
-app = Flask(__name__, static_folder="public", static_url_path="")
+app = Flask(__name__, template_folder=_TEMPLATES, static_folder=_PUBLIC, static_url_path="")
 app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(24)
 
 # ── Session / Cookie Security ─────────────────────────────────────────────────
