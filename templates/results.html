@@ -94,9 +94,30 @@
 
         <!-- Scanned URL pill -->
         <div class="scanned-bar">
-          <span class="scanned-label">Scanned</span>
-          <span class="scanned-dot"></span>
-          <span class="scanned-url">{{ final_url }}</span>
+          <div class="scanned-left">
+            <span class="scanned-label">Scanned</span>
+            <span class="scanned-dot"></span>
+            <span class="scanned-url">{{ final_url }}</span>
+          </div>
+          {% if current_user %}
+          <div class="scanned-right-actions">
+            <form action="/dashboard/monitor/toggle" method="POST" class="monitor-toggle-form" style="margin: 0;">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="url" value="{{ url }}">
+              {% if is_monitored %}
+              <input type="hidden" name="action" value="disable">
+              <button type="submit" id="toggle-monitor-btn" class="btn btn-monitored btn-sm" title="Click to stop daily monitoring">
+                <span aria-hidden="true">✓</span> Monitored (Daily)
+              </button>
+              {% else %}
+              <input type="hidden" name="action" value="enable">
+              <button type="submit" id="toggle-monitor-btn" class="btn btn-outline btn-sm btn-monitor-cta" title="Schedule automatic daily re-scans for this site ({{ monitored_count }}/{{ max_monitored }} used)">
+                <span aria-hidden="true">📡</span> Monitor this site
+              </button>
+              {% endif %}
+            </form>
+          </div>
+          {% endif %}
         </div>
 
         <!-- Session History Quick Switcher Bar (Hidden if empty or only 1 scan) -->

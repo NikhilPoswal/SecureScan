@@ -45,6 +45,9 @@ except ImportError:
 from db import (
     get_db_connection, init_db,
     save_scan, get_user_scans, get_scan_by_id, delete_scan,
+    add_monitored_site, stop_monitored_site, is_site_monitored,
+    get_user_monitored_sites, get_monitored_sites_due, update_monitored_site_checked,
+    count_user_monitored_sites, MAX_MONITORED_SITES_PER_USER,
 )
 from auth import (
     hash_password, check_password,
@@ -2073,7 +2076,7 @@ def account():
 @app.route("/dashboard")
 def dashboard():
     """
-    Dashboard of saved scans for the authenticated user.
+    Dashboard of saved scans and monitored sites for the authenticated user.
     Redirects to /login if not authenticated.
     Supports pagination: ?page=1 (20 scans per page).
     """
@@ -2096,8 +2099,19 @@ def dashboard():
         app.logger.error(f"Failed to load user scans: {e}")
         scans, total = [], 0
 
+    try:
+        monitored_sites = get_user_monitored_sites(g.current_user["id"])
+    except Exception as e:
+        app.logger.error(f"Failed to load monitored sites: {e}")
+        monitored_sites = []
+
+    monitored_count = len(monitored_sites)
+    max_monitored = MAX_MONITORED_SITES_PER_USER
     total_pages = max(1, (total + per_page - 1) // per_page)
     csrf_token = generate_csrf_token(session)
+
+    dashboard_error = request.args.get("error")
+    dashboard_success = request.args.get("success")
 
     return render_template(
         "dashboard.html",
@@ -2105,7 +2119,12 @@ def dashboard():
         total=total,
         page=page,
         total_pages=total_pages,
+        monitored_sites=monitored_sites,
+        monitored_count=monitored_count,
+        max_monitored=max_monitored,
         csrf_token=csrf_token,
+        dashboard_error=dashboard_error,
+        dashboard_success=dashboard_success,
     )
 
 
@@ -2137,6 +2156,9 @@ def view_saved_scan(scan_id: int):
         }
         report_json_b64 = base64.b64encode(json.dumps(report_dict).encode("utf-8")).decode("ascii")
 
+    is_mon, mon_id = is_site_monitored(g.current_user["id"], scan["url"])
+    mon_count = count_user_monitored_sites(g.current_user["id"])
+
     return render_template(
         "results.html",
         url=scan["url"],
@@ -2147,6 +2169,11 @@ def view_saved_scan(scan_id: int):
         report_json_b64=report_json_b64,
         is_saved_scan=True,
         saved_scan_id=scan["id"],
+        is_monitored=is_mon,
+        monitored_site_id=mon_id,
+        monitored_count=mon_count,
+        max_monitored=MAX_MONITORED_SITES_PER_USER,
+        csrf_token=generate_csrf_token(session),
     )
 
 
@@ -2162,8 +2189,10 @@ def delete_saved_scan(scan_id: int):
     form_csrf = request.form.get("_csrf_token")
     if not validate_csrf_token(session, form_csrf):
         return render_template("dashboard.html",
-                               error="Invalid CSRF token for deletion. Please try again.",
+                               dashboard_error="Invalid CSRF token for deletion. Please try again.",
                                scans=[], total=0, page=1, total_pages=1,
+                               monitored_sites=[], monitored_count=0,
+                               max_monitored=MAX_MONITORED_SITES_PER_USER,
                                csrf_token=generate_csrf_token(session)), 400
 
     deleted = delete_scan(scan_id, user_id=g.current_user["id"])
@@ -2171,6 +2200,170 @@ def delete_saved_scan(scan_id: int):
         return render_template("index.html", error="Scan not found or access denied."), 404
 
     return redirect("/dashboard")
+
+
+@app.route("/dashboard/monitor/toggle", methods=["POST"])
+def toggle_monitor():
+    """
+    Toggle monitoring for a target URL (enable or disable).
+    Requires authentication and CSRF token.
+    Enforces MAX_MONITORED_SITES_PER_USER limit on the Free tier.
+    """
+    if not g.current_user:
+        return redirect("/login")
+
+    form_csrf = request.form.get("_csrf_token")
+    if not validate_csrf_token(session, form_csrf):
+        return render_template("dashboard.html",
+                               dashboard_error="Invalid CSRF token for monitoring action.",
+                               scans=[], total=0, page=1, total_pages=1,
+                               monitored_sites=[], monitored_count=0,
+                               max_monitored=MAX_MONITORED_SITES_PER_USER,
+                               csrf_token=generate_csrf_token(session)), 400
+
+    url = (request.form.get("url") or "").strip()
+    action = request.form.get("action", "").strip().lower()
+
+    if not url:
+        return redirect(url_for("dashboard", error="Please provide a valid URL to monitor."))
+
+    user_id = g.current_user["id"]
+    is_mon, site_id = is_site_monitored(user_id, url)
+
+    if action == "disable" or (not action and is_mon):
+        if site_id:
+            stop_monitored_site(site_id, user_id)
+        return redirect(url_for("dashboard", success=f"Monitoring stopped for {url}."))
+    else:
+        # Enable monitoring
+        try:
+            add_monitored_site(user_id, url)
+            return redirect(url_for("dashboard", success=f"Scheduled daily monitoring enabled for {url}!"))
+        except ValueError as err:
+            return redirect(url_for("dashboard", error=str(err)))
+        except Exception as exc:
+            app.logger.error(f"Failed to add monitored site: {exc}")
+            return redirect(url_for("dashboard", error="Could not enable monitoring at this time."))
+
+
+@app.route("/dashboard/monitor/<int:site_id>/delete", methods=["POST"])
+def delete_monitored(site_id: int):
+    """
+    Stop monitoring a site with CSRF validation.
+    Strictly authorized to the logged-in user: returns 404 if site belongs to another user.
+    """
+    if not g.current_user:
+        return redirect("/login")
+
+    form_csrf = request.form.get("_csrf_token")
+    if not validate_csrf_token(session, form_csrf):
+        return render_template("dashboard.html",
+                               dashboard_error="Invalid CSRF token.",
+                               scans=[], total=0, page=1, total_pages=1,
+                               monitored_sites=[], monitored_count=0,
+                               max_monitored=MAX_MONITORED_SITES_PER_USER,
+                               csrf_token=generate_csrf_token(session)), 400
+
+    deleted = stop_monitored_site(site_id, user_id=g.current_user["id"])
+    if not deleted:
+        return render_template("index.html", error="Monitored site not found or access denied."), 404
+
+    return redirect(url_for("dashboard", success="Site removed from scheduled monitoring."))
+
+
+@app.route("/api/cron/rescan", methods=["GET", "POST"])
+def cron_rescan():
+    """
+    Scheduled re-scan worker triggered by Vercel Cron.
+    Secured by Vercel's CRON_SECRET or manual test parameter.
+    Selects active sites due for a check, re-audits each target,
+    persists a new scan record in the `scans` table, and updates `last_checked_at`.
+    Fault-tolerant: failures on one site do not break subsequent sites.
+    """
+    cron_secret = os.environ.get("CRON_SECRET")
+    auth_header = request.headers.get("Authorization", "")
+    key_param = request.args.get("key", "")
+    manual_flag = request.args.get("manual", "")
+    secret_key = os.environ.get("SECRET_KEY", "")
+
+    is_authorized = False
+    if not cron_secret:
+        # In local dev or if CRON_SECRET is not configured, allow local/manual invocation
+        is_authorized = True
+    elif auth_header == f"Bearer {cron_secret}":
+        is_authorized = True
+    elif key_param and (key_param == cron_secret or (secret_key and key_param == secret_key)):
+        is_authorized = True
+    elif manual_flag == "1" and request.remote_addr in ("127.0.0.1", "::1", "localhost"):
+        is_authorized = True
+
+    if not is_authorized:
+        return jsonify({
+            "error": "Unauthorized",
+            "message": "Invalid or missing cron authorization credentials."
+        }), 401
+
+    start_time = time.time()
+    due_sites = get_monitored_sites_due(limit=10)
+    results = []
+    scanned_success = 0
+    errors = 0
+
+    for site in due_sites:
+        site_id = site["id"]
+        user_id = site["user_id"]
+        url = site["url"]
+
+        try:
+            audit_res = audit_target(url, timeout=10)
+            if audit_res.get("success"):
+                new_scan_id = save_scan(
+                    user_id=user_id,
+                    url=audit_res["raw_url"],
+                    final_url=audit_res["final_url"],
+                    score=audit_res["score"],
+                    grade=audit_res["grade"],
+                    results_data=audit_res,
+                )
+                update_monitored_site_checked(site_id)
+                scanned_success += 1
+                results.append({
+                    "site_id": site_id,
+                    "url": url,
+                    "status": "success",
+                    "score": audit_res["score"],
+                    "grade": audit_res["grade"],
+                    "scan_id": new_scan_id,
+                })
+            else:
+                update_monitored_site_checked(site_id)
+                errors += 1
+                results.append({
+                    "site_id": site_id,
+                    "url": url,
+                    "status": "audit_failed",
+                    "error": audit_res.get("error") or "Audit returned unsuccessful",
+                })
+        except Exception as exc:
+            app.logger.error(f"Scheduled scan exception for site {site_id} ({url}): {exc}")
+            update_monitored_site_checked(site_id)
+            errors += 1
+            results.append({
+                "site_id": site_id,
+                "url": url,
+                "status": "exception",
+                "error": str(exc),
+            })
+
+    elapsed = round(time.time() - start_time, 2)
+    return jsonify({
+        "status": "ok",
+        "duration_seconds": elapsed,
+        "total_due": len(due_sites),
+        "scanned_success": scanned_success,
+        "errors": errors,
+        "results": results,
+    }), 200
 
 
 @app.route("/scan", methods=["GET", "POST"])
@@ -2207,6 +2400,9 @@ def scan():
 
     # Automatically save scan if user is logged in (Batch 2)
     saved_scan_id = None
+    is_mon = False
+    mon_id = None
+    mon_count = 0
     if g.current_user:
         try:
             saved_scan_id = save_scan(
@@ -2220,6 +2416,12 @@ def scan():
         except Exception as e:
             app.logger.error(f"Failed to auto-save scan: {e}")
 
+        try:
+            is_mon, mon_id = is_site_monitored(g.current_user["id"], result["raw_url"])
+            mon_count = count_user_monitored_sites(g.current_user["id"])
+        except Exception as e:
+            app.logger.error(f"Failed to check monitoring status: {e}")
+
     resp = make_response(
         render_template(
             "results.html",
@@ -2230,6 +2432,11 @@ def scan():
             checks=result["checks"],
             report_json_b64=result["report_json_b64"],
             saved_scan_id=saved_scan_id,
+            is_monitored=is_mon,
+            monitored_site_id=mon_id,
+            monitored_count=mon_count,
+            max_monitored=MAX_MONITORED_SITES_PER_USER,
+            csrf_token=generate_csrf_token(session) if g.current_user else "",
         )
     )
     resp.headers["X-RateLimit-Limit"] = str(scan_limiter.max_requests)

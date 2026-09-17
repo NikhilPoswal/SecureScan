@@ -1,4 +1,10 @@
 {
+  "crons": [
+    {
+      "path": "/api/cron/rescan",
+      "schedule": "0 0 * * *"
+    }
+  ],
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index" }
   ],
@@ -8,3 +14,4 @@
     }
   }
 }
+

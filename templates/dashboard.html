@@ -78,12 +78,146 @@
           </div>
         </div>
 
-        {% if error %}
-        <div class="alert alert-error" role="alert" style="margin-bottom: 24px;">
+        {% if dashboard_error or error %}
+        <div class="alert alert-error" role="alert" style="margin-bottom: 24px;" id="dashboard-error-banner">
           <span class="alert-icon" aria-hidden="true">⚠️</span>
-          <span class="alert-text">{{ error }}</span>
+          <span class="alert-text">{{ dashboard_error or error }}</span>
         </div>
         {% endif %}
+
+        {% if dashboard_success %}
+        <div class="alert alert-success" role="alert" style="margin-bottom: 24px;" id="dashboard-success-banner">
+          <span class="alert-icon" aria-hidden="true">✅</span>
+          <span class="alert-text">{{ dashboard_success }}</span>
+        </div>
+        {% endif %}
+
+        <!-- ── Monitored Sites Section (Batch 3) ── -->
+        <section class="dashboard-section" id="monitored-sites-section" aria-labelledby="monitored-heading">
+          <div class="section-header-row">
+            <div>
+              <h2 class="dashboard-section-title" id="monitored-heading">
+                <span aria-hidden="true">📡</span> Monitored Sites
+              </h2>
+              <p class="dashboard-section-sub">Automated daily re-scans &amp; security posture tracking over time.</p>
+            </div>
+            <div class="quota-pill" id="monitoring-quota-pill" aria-label="Monitoring quota: {{ monitored_count }} of {{ max_monitored }} sites used">
+              <span class="quota-count" id="quota-count">{{ monitored_count }}</span> / {{ max_monitored }} Sites Monitored
+              <span class="quota-tier">Free Tier</span>
+            </div>
+          </div>
+
+          {% if monitored_sites %}
+          <div class="monitored-grid" role="list" aria-label="Actively monitored websites">
+            {% for m in monitored_sites %}
+            <div class="monitored-card" role="listitem" id="monitored-card-{{ m.id }}">
+              <div class="monitored-card-top">
+                <div class="monitored-site-details">
+                  <div class="monitored-url-row">
+                    <span class="monitored-active-dot" aria-hidden="true"></span>
+                    <a href="/scan?url={{ m.url }}" class="monitored-domain" title="{{ m.url }}">{{ m.url }}</a>
+                    <span class="freq-tag">Daily</span>
+                  </div>
+                  <div class="monitored-meta-row">
+                    {% if m.last_checked_at %}
+                    <span class="monitored-time">🕒 Last checked: {{ m.last_checked_at.strftime('%b %d, %Y · %H:%M UTC') if m.last_checked_at.strftime is defined else m.last_checked_at }}</span>
+                    {% else %}
+                    <span class="monitored-time pending">⏳ Pending first scheduled check</span>
+                    {% endif %}
+                  </div>
+                </div>
+
+                <!-- Latest score badge -->
+                <div class="monitored-score-badge">
+                  {% if m.latest_score is not none %}
+                  <div class="scan-grade-badge grade-{{ m.latest_grade | lower }}" aria-label="Grade {{ m.latest_grade }}, Score {{ m.latest_score }}">
+                    <span class="scan-grade-letter">{{ m.latest_grade }}</span>
+                    <span class="scan-grade-score">{{ m.latest_score }}</span>
+                  </div>
+                  {% else %}
+                  <div class="scan-grade-badge grade-na">
+                    <span class="scan-grade-letter">—</span>
+                    <span class="scan-grade-score">N/A</span>
+                  </div>
+                  {% endif %}
+                </div>
+              </div>
+
+              <!-- Score Trend & Progression -->
+              <div class="monitored-trend-wrap">
+                <div class="trend-label-row">
+                  <span class="trend-label">Score History</span>
+                  {% if m.trend_diff is defined and m.trend_diff != 0 %}
+                    {% if m.trend_diff > 0 %}
+                    <span class="trend-indicator up" aria-label="Score improved by {{ m.trend_diff }} points">▲ +{{ m.trend_diff }} pts</span>
+                    {% else %}
+                    <span class="trend-indicator down" aria-label="Score declined by {{ m.trend_diff }} points">▼ {{ m.trend_diff }} pts</span>
+                    {% endif %}
+                  {% else %}
+                  <span class="trend-indicator stable" aria-label="Score stable">— Stable</span>
+                  {% endif %}
+                </div>
+
+                <!-- History pills progression -->
+                <div class="score-spark-row" aria-label="Score progression">
+                  {% if m.recent_scores %}
+                    {% for sc in m.recent_scores %}
+                    <a href="/dashboard/scan/{{ sc.id }}" class="spark-pill grade-{{ sc.grade | lower }}" title="Score: {{ sc.score }} on {{ sc.created_at.strftime('%b %d') if sc.created_at.strftime is defined else sc.created_at }}">
+                      <span class="spark-score">{{ sc.score }}</span>
+                    </a>
+                    {% if not loop.last %}
+                    <span class="spark-arrow" aria-hidden="true">→</span>
+                    {% endif %}
+                    {% endfor %}
+                  {% else %}
+                  <span class="spark-empty">No scan history recorded yet.</span>
+                  {% endif %}
+                </div>
+              </div>
+
+              <!-- Card Actions -->
+              <div class="monitored-card-actions">
+                <a href="/scan?url={{ m.url }}" class="btn btn-outline btn-sm" id="scan-now-btn-{{ m.id }}">
+                  ⚡ Scan Now
+                </a>
+                <form action="/dashboard/monitor/{{ m.id }}/delete" method="POST" class="stop-monitor-form" style="display:inline;">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                  <button type="submit" class="btn btn-danger-outline btn-sm" id="stop-monitor-btn-{{ m.id }}" aria-label="Stop monitoring {{ m.url }}">
+                    ⏹️ Stop Monitoring
+                  </button>
+                </form>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+
+          {% else %}
+          <!-- Empty Monitored State -->
+          <div class="monitored-empty-card" id="monitored-empty-card">
+            <div class="monitored-empty-content">
+              <span class="monitored-empty-icon" aria-hidden="true">📡</span>
+              <div>
+                <h3 class="monitored-empty-title">No sites currently monitored</h3>
+                <p class="monitored-empty-desc">
+                  Protect your production services against SSL expirations, missing headers, and configuration drifts.
+                  Click <strong>"Monitor this site"</strong> on any audit report to schedule automatic daily re-scans.
+                </p>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+        </section>
+
+        <!-- ── Saved Scans Section ── -->
+        <section class="dashboard-section" id="saved-scans-section" aria-labelledby="saved-scans-heading">
+          <div class="section-header-row">
+            <div>
+              <h2 class="dashboard-section-title" id="saved-scans-heading">
+                <span aria-hidden="true">🛡️</span> Saved Audit Reports
+              </h2>
+              <p class="dashboard-section-sub">Full 10-point audit reports preserved from your recent security scans.</p>
+            </div>
+          </div>
 
         {% if total == 0 %}
         <!-- Empty State -->
@@ -190,6 +324,7 @@
         {% endif %}
 
         {% endif %}
+        </section>
 
       </main>
 
