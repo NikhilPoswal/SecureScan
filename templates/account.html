@@ -67,6 +67,20 @@
             <p class="auth-subtitle">SecureScan member</p>
           </div>
 
+          {% if success %}
+          <div class="alert alert-success" role="alert" style="margin-bottom: 20px;" id="account-success-banner">
+            <span class="alert-icon" aria-hidden="true">✅</span>
+            <span>{{ success }}</span>
+          </div>
+          {% endif %}
+
+          {% if error %}
+          <div class="alert alert-error" role="alert" style="margin-bottom: 20px;" id="account-error-banner">
+            <span class="alert-icon" aria-hidden="true">⚠️</span>
+            <span>{{ error }}</span>
+          </div>
+          {% endif %}
+
           <!-- Info rows -->
           <div class="account-info-list" role="list">
 
@@ -93,6 +107,44 @@
               </span>
             </div>
 
+          </div>
+
+          <!-- ── Notification Preferences (Batch 4) ── -->
+          <div class="account-pref-section" id="notification-preferences">
+            <h2 class="account-section-title">
+              <span aria-hidden="true">🔔</span> Notification Preferences
+            </h2>
+            <p class="account-section-desc">
+              Control security alerts sent to <strong>{{ current_user.email }}</strong>.
+            </p>
+
+            <form method="POST" action="/account/preferences" class="pref-form" id="pref-form">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              
+              <label class="pref-toggle-row" for="email_alerts_toggle">
+                <div class="pref-toggle-info">
+                  <span class="pref-toggle-title">Security Regression Alerts</span>
+                  <span class="pref-toggle-desc">
+                    Receive automated transactional email alerts when a monitored domain drops &ge;10 points, worsens in grade, or fails a previously-passed security check.
+                  </span>
+                </div>
+                <div class="pref-toggle-control">
+                  <input
+                    type="checkbox"
+                    name="email_alerts"
+                    id="email_alerts_toggle"
+                    class="pref-switch-input"
+                    value="1"
+                    {% if current_user.email_alerts is not defined or current_user.email_alerts %}checked{% endif %}
+                    onchange="document.getElementById('pref-form').submit();"
+                  >
+                  <span class="pref-switch-slider" aria-hidden="true"></span>
+                </div>
+              </label>
+              <noscript>
+                <button type="submit" class="btn btn-primary btn-sm" style="margin-top: 10px;">Save Preferences</button>
+              </noscript>
+            </form>
           </div>
 
           <!-- Actions -->

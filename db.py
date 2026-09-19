@@ -112,6 +112,9 @@ def init_db() -> None:
 
     CREATE INDEX IF NOT EXISTS idx_monitored_sites_active_due ON monitored_sites (is_active, last_checked_at);
     CREATE INDEX IF NOT EXISTS idx_monitored_sites_user ON monitored_sites (user_id);
+
+    -- Batch 4: User email notification preference
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_alerts BOOLEAN NOT NULL DEFAULT TRUE;
     """
 
     conn = get_db_connection()
@@ -433,5 +436,79 @@ def update_monitored_site_checked(site_id: int) -> None:
                 )
     finally:
         conn.close()
+
+
+# ─── Batch 4: Email Alert & Scan History Comparison Helpers ───────────────────
+
+def update_user_email_alerts(user_id: int, enabled: bool) -> bool:
+    """
+    Update email alert notification preference for a user.
+    """
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE users SET email_alerts = %s WHERE id = %s",
+                    (enabled, user_id),
+                )
+                return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_user_email_alert_preference(user_id: int) -> bool:
+    """
+    Check if a user has enabled email alerts (defaults to True if not explicitly disabled).
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT email_alerts FROM users WHERE id = %s", (user_id,))
+            row = cur.fetchone()
+            if row and "email_alerts" in row and row["email_alerts"] is not None:
+                return bool(row["email_alerts"])
+            return True
+    finally:
+        conn.close()
+
+
+def get_previous_scan_for_user_and_url(
+    user_id: int,
+    url: str,
+    exclude_scan_id: Optional[int] = None,
+) -> Optional[dict]:
+    """
+    Fetch the most recent prior scan record for a specific user and URL,
+    optionally excluding the current/newest scan ID.
+    Used during scheduled re-scans to compare metrics and detect regressions.
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            query = """
+                SELECT id, user_id, url, final_url, score, grade, results_json, created_at
+                FROM scans
+                WHERE user_id = %s AND (url = %s OR final_url = %s)
+            """
+            params: List[Any] = [user_id, url, url]
+            if exclude_scan_id:
+                query += " AND id != %s"
+                params.append(exclude_scan_id)
+            query += " ORDER BY id DESC LIMIT 1"
+            cur.execute(query, tuple(params))
+            row = cur.fetchone()
+            if not row:
+                return None
+            res = dict(row)
+            if isinstance(res.get("results_json"), str):
+                try:
+                    res["results_json"] = json.loads(res["results_json"])
+                except Exception:
+                    pass
+            return res
+    finally:
+        conn.close()
+
 
 

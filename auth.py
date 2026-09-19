@@ -129,7 +129,7 @@ def get_user_by_email(email: str) -> Optional[dict]:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, email, password_hash, created_at FROM users WHERE email = %s",
+                "SELECT id, email, password_hash, created_at, email_alerts FROM users WHERE email = %s",
                 (email,),
             )
             row = cur.fetchone()
@@ -142,13 +142,13 @@ def get_user_by_id(user_id: int) -> Optional[dict]:
     """
     Fetch a user row by primary key.
 
-    Returns a dict (id, email, created_at) or None if not found.
+    Returns a dict (id, email, created_at, email_alerts) or None if not found.
     """
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, email, created_at FROM users WHERE id = %s",
+                "SELECT id, email, created_at, email_alerts FROM users WHERE id = %s",
                 (user_id,),
             )
             row = cur.fetchone()

@@ -48,12 +48,14 @@ from db import (
     add_monitored_site, stop_monitored_site, is_site_monitored,
     get_user_monitored_sites, get_monitored_sites_due, update_monitored_site_checked,
     count_user_monitored_sites, MAX_MONITORED_SITES_PER_USER,
+    update_user_email_alerts, get_user_email_alert_preference, get_previous_scan_for_user_and_url,
 )
 from auth import (
     hash_password, check_password,
     create_user, get_user_by_email, get_user_by_id,
     generate_csrf_token, validate_csrf_token,
 )
+from email_service import send_security_alert_email
 
 # static_folder='public' + static_url_path='' mirrors Vercel's CDN behaviour:
 # /css/style.css → public/css/style.css in both local dev and production.
@@ -2064,13 +2066,43 @@ def logout():
 @app.route("/account")
 def account():
     """
-    Account overview page — shows the logged-in user's email and member-since date.
+    Account overview page — shows the logged-in user's email, member-since date,
+    and notification preferences.
     Redirects to /login if the user is not authenticated.
-    No sensitive operations happen here (read-only); CSRF not required.
     """
     if not g.current_user:
         return redirect("/login")
-    return render_template("account.html")
+    return render_template(
+        "account.html",
+        csrf_token=generate_csrf_token(session),
+        success=request.args.get("success"),
+        error=request.args.get("error"),
+    )
+
+
+@app.route("/account/preferences", methods=["POST"])
+def update_preferences():
+    """
+    Update user notification preferences (e.g. email_alerts toggle).
+    Requires authentication and CSRF token.
+    """
+    if not g.current_user:
+        return redirect("/login")
+
+    form_csrf = request.form.get("_csrf_token")
+    if not validate_csrf_token(session, form_csrf):
+        return redirect(url_for("account", error="Invalid or expired CSRF token. Please try again."))
+
+    # Checkbox sends "1" or "on" when checked; missing when unchecked
+    email_alerts = bool(request.form.get("email_alerts"))
+
+    try:
+        update_user_email_alerts(g.current_user["id"], email_alerts)
+        status_str = "enabled" if email_alerts else "disabled"
+        return redirect(url_for("account", success=f"Security regression email alerts {status_str}."))
+    except Exception as exc:
+        app.logger.error(f"Failed to update email alert preferences: {exc}")
+        return redirect(url_for("account", error="Failed to update notification preferences. Please try again."))
 
 
 @app.route("/dashboard")
@@ -2271,14 +2303,87 @@ def delete_monitored(site_id: int):
     return redirect(url_for("dashboard", success="Site removed from scheduled monitoring."))
 
 
+GRADE_RANKS = {
+    "A+": 0, "A": 1, "A-": 2,
+    "B+": 3, "B": 4, "B-": 5,
+    "C+": 6, "C": 7, "C-": 8,
+    "D": 9, "F": 10,
+}
+
+
+def evaluate_security_regression(prev_scan: dict, curr_scan: dict) -> Tuple[bool, list, list]:
+    """
+    Evaluates if a re-scan shows a meaningful security regression according to Batch 4 specifications:
+    1. Score drops by 10 or more points (prev_score - curr_score >= 10).
+    2. Letter grade degrades to a lower rank (e.g. A -> B, B -> D).
+    3. Any security check that previously passed is now failing.
+
+    Returns (has_regression: bool, reasons: list[str], newly_failing_checks: list[dict]).
+    """
+    if not prev_scan or not curr_scan:
+        return False, [], []
+
+    reasons = []
+    try:
+        prev_score = int(prev_scan.get("score", 0))
+    except (ValueError, TypeError):
+        prev_score = 0
+    try:
+        curr_score = int(curr_scan.get("score", 0))
+    except (ValueError, TypeError):
+        curr_score = 0
+
+    score_delta = prev_score - curr_score
+
+    # 1. Score drop of 10+ points
+    if score_delta >= 10:
+        reasons.append(f"Security score dropped by {score_delta} points ({prev_score} \u2192 {curr_score})")
+
+    # 2. Grade worsened
+    prev_grade = str(prev_scan.get("grade", "")).strip().upper()
+    curr_grade = str(curr_scan.get("grade", "")).strip().upper()
+    prev_rank = GRADE_RANKS.get(prev_grade, 5)
+    curr_rank = GRADE_RANKS.get(curr_grade, 5)
+    if curr_rank > prev_rank:
+        reasons.append(f"Security grade degraded from {prev_grade} to {curr_grade}")
+
+    # 3. Check flips (previously passed -> now failing)
+    prev_results = prev_scan.get("results_json") or {}
+    if isinstance(prev_results, str):
+        try:
+            prev_results = json.loads(prev_results)
+        except Exception:
+            prev_results = {}
+    prev_checks = {
+        c["name"]: bool(c.get("passed", False))
+        for c in prev_results.get("checks", [])
+        if isinstance(c, dict) and "name" in c
+    }
+
+    curr_checks = curr_scan.get("checks", [])
+    newly_failing = []
+    for check in curr_checks:
+        if not isinstance(check, dict):
+            continue
+        check_name = check.get("name", "")
+        # Did it pass previously and fail now?
+        if not check.get("passed", False) and prev_checks.get(check_name) is True:
+            newly_failing.append(check)
+            reasons.append(f"Check '{check_name}' flipped from PASS to FAIL (-{check.get('deducted', 0)} pts)")
+
+    has_regression = (len(reasons) > 0)
+    return has_regression, reasons, newly_failing
+
+
 @app.route("/api/cron/rescan", methods=["GET", "POST"])
 def cron_rescan():
     """
     Scheduled re-scan worker triggered by Vercel Cron.
     Secured by Vercel's CRON_SECRET or manual test parameter.
     Selects active sites due for a check, re-audits each target,
-    persists a new scan record in the `scans` table, and updates `last_checked_at`.
-    Fault-tolerant: failures on one site do not break subsequent sites.
+    persists a new scan record in the `scans` table, updates `last_checked_at`,
+    and triggers transactional email alerts on detected security regressions.
+    Fault-tolerant: email failures or audit errors never block subsequent sites.
     """
     cron_secret = os.environ.get("CRON_SECRET")
     auth_header = request.headers.get("Authorization", "")
@@ -2308,11 +2413,29 @@ def cron_rescan():
     results = []
     scanned_success = 0
     errors = 0
+    alerts_sent = 0
+    alerts_failed = 0
+    alerts_suppressed = 0
+
+    # Base URL for email report links
+    base_url = os.environ.get("APP_URL") or os.environ.get("VERCEL_PROJECT_PRODUCTION_URL")
+    if base_url:
+        if not base_url.startswith("http"):
+            base_url = f"https://{base_url}"
+    else:
+        base_url = request.host_url.rstrip("/") if request.host_url else "https://project-secure-scan-20.vercel.app"
 
     for site in due_sites:
         site_id = site["id"]
         user_id = site["user_id"]
         url = site["url"]
+
+        # Fetch baseline / previous scan BEFORE creating the new scan record
+        prev_scan = None
+        try:
+            prev_scan = get_previous_scan_for_user_and_url(user_id, url)
+        except Exception as e:
+            app.logger.error(f"Failed to fetch previous scan baseline for user {user_id} and url {url}: {e}")
 
         try:
             audit_res = audit_target(url, timeout=10)
@@ -2327,6 +2450,51 @@ def cron_rescan():
                 )
                 update_monitored_site_checked(site_id)
                 scanned_success += 1
+
+                # Evaluate regression against previous baseline
+                alert_status = "none"
+                if prev_scan:
+                    has_regression, reasons, newly_failing = evaluate_security_regression(prev_scan, audit_res)
+                    if has_regression:
+                        user_wants_alerts = get_user_email_alert_preference(user_id)
+                        if user_wants_alerts:
+                            try:
+                                user_obj = get_user_by_id(user_id)
+                                recipient_email = user_obj["email"] if user_obj else None
+                                if recipient_email:
+                                    sent_ok = send_security_alert_email(
+                                        recipient_email=recipient_email,
+                                        target_url=audit_res.get("raw_url", url),
+                                        prev_score=prev_scan["score"],
+                                        curr_score=audit_res["score"],
+                                        prev_grade=prev_scan["grade"],
+                                        curr_grade=audit_res["grade"],
+                                        reasons=reasons,
+                                        newly_failing_checks=newly_failing,
+                                        scan_id=new_scan_id,
+                                        base_url=base_url,
+                                    )
+                                    if sent_ok:
+                                        alerts_sent += 1
+                                        alert_status = "sent"
+                                    else:
+                                        alerts_failed += 1
+                                        alert_status = "failed"
+                                else:
+                                    alerts_failed += 1
+                                    alert_status = "no_recipient"
+                            except Exception as alert_exc:
+                                app.logger.error(f"Failed sending alert email for site {site_id}: {alert_exc}")
+                                alerts_failed += 1
+                                alert_status = f"exception: {str(alert_exc)}"
+                        else:
+                            alerts_suppressed += 1
+                            alert_status = "suppressed_by_preference"
+                    else:
+                        alert_status = "no_regression"
+                else:
+                    alert_status = "initial_scan"
+
                 results.append({
                     "site_id": site_id,
                     "url": url,
@@ -2334,6 +2502,7 @@ def cron_rescan():
                     "score": audit_res["score"],
                     "grade": audit_res["grade"],
                     "scan_id": new_scan_id,
+                    "alert": alert_status,
                 })
             else:
                 update_monitored_site_checked(site_id)
@@ -2362,6 +2531,9 @@ def cron_rescan():
         "total_due": len(due_sites),
         "scanned_success": scanned_success,
         "errors": errors,
+        "alerts_sent": alerts_sent,
+        "alerts_failed": alerts_failed,
+        "alerts_suppressed": alerts_suppressed,
         "results": results,
     }), 200
 
